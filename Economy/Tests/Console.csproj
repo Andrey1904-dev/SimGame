@@ -1,0 +1,26 @@
+<!--
+  Опциональный проект для прогона тестов ВНЕ Unity (dotnet run).
+  В Unity этот .csproj не используется и не компилируется.
+  Целевая версия намеренно широкая: код модуля не использует новинок новее C# 9 / .NETStandard 2.1.
+  Требуется установленный .NET SDK (у Codex на Mac он есть).
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>LifeFromZero.Economy.Tests</AssemblyName>
+    <RootNamespace>LifeFromZero.Economy.Tests</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../Core/**/*.cs" />
+    <Compile Include="../Shop/**/*.cs" />
+    <Compile Include="**/*.cs" />
+  </ItemGroup>
+
+</Project>
