@@ -55,6 +55,8 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
     {
         [Header("Генерация города")]
         [SerializeField] private int seed = 1904;
+        /// <summary>Макет: quarter250 (по умолчанию, 250×250) или district750 (ТЗ №031, 750×750).</summary>
+        [SerializeField] private string layoutId = QuarterLayoutIds.Quarter250;
         [SerializeField] private bool generateOnStart = true;
         [SerializeField] private bool addColliders = true;
 
@@ -70,6 +72,8 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         public int Seed { get => seed; set => seed = value; }
         /// <summary>Строить ли город автоматически при старте сцены.</summary>
         public bool GenerateOnStart { get => generateOnStart; set => generateOnStart = value; }
+        /// <summary>Выбранный макет (QuarterLayoutIds.Quarter250 или District750).</summary>
+        public string LayoutId { get => layoutId; set => layoutId = value; }
 
         private void Start()
         {
@@ -89,7 +93,9 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             var stopwatch = Stopwatch.StartNew();
             try
             {
-                QuarterPlan plan = QuarterGenerator.Generate(seed);
+                QuarterPlan plan = layoutId == QuarterLayoutIds.District750
+                    ? DistrictMapGenerator.Generate(seed)
+                    : QuarterGenerator.Generate(seed);
                 QuarterUnityAdapter adapter = Adapter();
                 GameObject root = adapter.Build(plan, transform);
                 stopwatch.Stop();
@@ -109,7 +115,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                     LastError = "",
                 };
                 UnityEngine.Debug.Log(
-                    "[CityBootstrap] Город построен: seed=" + plan.Seed +
+                    "[CityBootstrap] Город построен: макет=" + plan.LayoutId + ", seed=" + plan.Seed +
                     ", жилых зданий=" + plan.Buildings.Count +
                     ", объектов=" + plan.Objects.Count +
                     ", точек доставки=" + plan.DeliveryPoints.Count +
