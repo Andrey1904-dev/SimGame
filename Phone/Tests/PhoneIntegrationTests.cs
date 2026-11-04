@@ -33,6 +33,98 @@ namespace LifeFromZero.Phone.Tests
 
             // Регрессионные тесты аудита ТЗ №015.
             suite.Add("Интеграция: пустые записи в ответах источников не доходят до UI", AdaptersReturnNullEntries);
+
+            // Регрессионные тесты аудита ТЗ №017.
+            suite.Add("Интеграция: бейдж «Сообщения» обновляется при доставке через Inbox", MessagesBadgeFollowsInbox);
+            suite.Add("Интеграция: бейдж «Сообщения» идемпотентен и не накручивается", MessagesBadgeIsIdempotent);
+            suite.Add("Интеграция: список долгов отдаёт стадию взыскания", DebtsExposePhase);
+        }
+
+        /// <summary>
+        /// Дефект: доставка сообщения через IPhoneInbox увеличивала только счётчик
+        /// переписки, а бейдж приложения «messages» оставался нулевым.
+        /// </summary>
+        private static void MessagesBadgeFollowsInbox()
+        {
+            var facade = new PhoneFacade(
+                Apps.PhoneAppRegistry.CreateDefault(),
+                new PhoneMessageService(),
+                new PhoneBook(),
+                new PhoneNotificationService());
+
+            var clock = new FakePhoneClock(1d);
+
+            MiniTestRunner.AreEqual(0, facade.UnreadApps, "бейджа нет до доставки");
+
+            facade.Inbox.Deliver("anna", "Привет", clock);
+            facade.Inbox.Deliver("anna", "Второе", clock);
+
+            MiniTestRunner.AreEqual(2, facade.UnreadMessages, "два непрочитанных сообщения");
+            MiniTestRunner.AreEqual(0, facade.UnreadApps, "без синхронизации бейдж не обновлён — это и был дефект");
+
+            MiniTestRunner.IsTrue(facade.SyncMessageBadge().IsSuccess, "синхронизация выполнена");
+            MiniTestRunner.AreEqual(2, facade.Apps.Get(PhoneBadgeSync.MessagesAppId).Value.UnreadCount, "бейдж равен числу непрочитанных");
+
+            // Прочтение сообщений уменьшает бейдж, а не оставляет его «накопленным».
+            facade.Messages.MarkAllRead("anna");
+            MiniTestRunner.IsTrue(facade.SyncMessageBadge().IsSuccess, "повторная синхронизация");
+            MiniTestRunner.AreEqual(0, facade.Apps.Get(PhoneBadgeSync.MessagesAppId).Value.UnreadCount, "бейдж сброшен");
+        }
+
+        private static void MessagesBadgeIsIdempotent()
+        {
+            var facade = new PhoneFacade(
+                Apps.PhoneAppRegistry.CreateDefault(),
+                new PhoneMessageService(),
+                new PhoneBook(),
+                new PhoneNotificationService());
+
+            facade.Inbox.Deliver("anna", "Привет", new FakePhoneClock(1d));
+
+            for (int i = 0; i < 5; i++)
+            {
+                facade.SyncMessageBadge();
+            }
+
+            MiniTestRunner.AreEqual(1, facade.Apps.Get(PhoneBadgeSync.MessagesAppId).Value.UnreadCount, "бейдж не накручивается");
+
+            // Без зарегистрированного приложения синхронизация не притворяется успешной.
+            var bare = new PhoneFacade(
+                new Apps.PhoneAppRegistry(),
+                new PhoneMessageService(),
+                new PhoneBook(),
+                new PhoneNotificationService());
+
+            MiniTestRunner.AreEqual(PhoneResultCode.NotFound, bare.SyncMessageBadge().Code, "нет приложения — NotFound");
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.InvalidArgument,
+                PhoneBadgeSync.SyncMessagesBadge(null, bare.Messages).Code,
+                "без реестра — InvalidArgument");
+        }
+
+        /// <summary>
+        /// Дефект: DebtDto нёс только остаток и срок, поэтому экран «Банк»
+        /// не мог показать стадию взыскания (требование Phone ↔ Debts).
+        /// </summary>
+        private static void DebtsExposePhase()
+        {
+            var debts = new FakeDebtsSource
+            {
+                Debts = new[]
+                {
+                    new DebtDto("rent", "Аренда", 38400L, 1200d, DebtPhase.Collection),
+                    new DebtDto("phone", "Связь", 300L, -1d, DebtPhase.Current),
+                    new DebtDto("legacy", "Старый долг", 100L, -1d)
+                }
+            };
+
+            BankSummary summary = new BankSummaryService(new FakeBalanceSource { Rubles = 10L }, debts).GetSummary().Value;
+
+            MiniTestRunner.AreEqual(3, summary.Debts.Length, "три долга");
+            MiniTestRunner.AreEqual(DebtPhase.Collection, summary.Debts[0].Phase, "стадия взыскания видна");
+            MiniTestRunner.AreEqual(DebtPhase.Current, summary.Debts[1].Phase, "текущий долг");
+            MiniTestRunner.AreEqual(DebtPhase.Unknown, summary.Debts[2].Phase, "старый конструктор даёт Unknown");
+            MiniTestRunner.AreEqual(38400L, summary.Debts[0].AmountRubles, "остаток сохранён");
         }
 
         private static void IdSpacesIndependent()

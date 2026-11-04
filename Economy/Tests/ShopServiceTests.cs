@@ -65,6 +65,10 @@ namespace LifeFromZero.Economy.Tests
             suite.Add("Покупка: исключение каталога", CatalogThrows);
             suite.Add("Покупка: повторные попытки не дублируют деньги и предметы", ManyRepeatedPurchases);
 
+            // Регрессионный тест аудита ТЗ №017: журнал незавершённых возвратов
+            // раньше нельзя было сохранить, и деньги терялись при загрузке игры.
+            suite.Add("Возврат: журнал незавершённых возвратов переживает сохранение", PendingRefundsSurviveSaveLoad);
+
             return suite;
         }
 
@@ -626,6 +630,53 @@ namespace LifeFromZero.Economy.Tests
             MiniTestRunner.AreEqual(0L, wallet.Balance.Rubles, "деньги израсходованы точно");
             MiniTestRunner.AreEqual(10, inventory.GetCount("bread"), "предметов ровно 10, без дублей");
             MiniTestRunner.AreEqual(0, shop.PendingRefundCount, "журнал компенсаций пуст");
+        }
+
+        /// <summary>
+        /// Дефект: журнал незавершённых возвратов жил только в памяти. Если игра
+        /// сохранялась в момент, когда возврат не прошёл, после загрузки деньги
+        /// игрока были потеряны без следа. Теперь журнал можно прочитать и восстановить.
+        /// </summary>
+        private static void PendingRefundsSurviveSaveLoad()
+        {
+            var wallet = new FakeWallet(1000L) { RefundFailuresRemaining = 1 };
+            var inventory = new FakeInventory { TryAddOverride = false };
+            var shop = new ShopService(ShopCatalog.CreateDefault());
+
+            shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+
+            MiniTestRunner.AreEqual(1, shop.PendingRefundCount, "долг зафиксирован");
+            MiniTestRunner.AreEqual(1, shop.PendingRefunds.Count, "журнал читается");
+            MiniTestRunner.AreEqual(50L, shop.PendingRefunds[0].Rubles, "в журнале ровно списанная сумма");
+
+            // «Загрузка»: новый экземпляр сервиса с восстановленным журналом.
+            var loaded = new ShopService(ShopCatalog.CreateDefault());
+            loaded.RestorePendingRefunds(shop.PendingRefunds);
+
+            MiniTestRunner.AreEqual(1, loaded.PendingRefundCount, "журнал восстановлен");
+
+            // Пока адаптер отказывает, деньги остаются в журнале — не теряются.
+            wallet.RefundFailuresRemaining = 1;
+            MiniTestRunner.AreEqual(
+                EconomyResultCode.PendingRefund,
+                loaded.Purchase(wallet, inventory, new PurchaseRequest("bread", 1)).Code,
+                "пока долг не закрыт, покупки блокируются");
+            MiniTestRunner.AreEqual(1, loaded.PendingRefundCount, "запись не потеряна");
+            MiniTestRunner.AreEqual(950L, wallet.Balance.Rubles, "баланс ещё не исправлен");
+
+            wallet.RefundFailuresRemaining = 1;
+            MiniTestRunner.IsFalse(loaded.RetryPendingRefunds(wallet), "возврат всё ещё невозможен");
+            MiniTestRunner.AreEqual(1, loaded.PendingRefundCount, "запись не потеряна");
+            MiniTestRunner.AreEqual(950L, wallet.Balance.Rubles, "баланс ещё не исправлен");
+
+            // После успешного возврата журнал пуст, деньги вернулись ровно один раз.
+            MiniTestRunner.IsTrue(loaded.RetryPendingRefunds(wallet), "долг закрыт");
+            MiniTestRunner.AreEqual(0, loaded.PendingRefundCount, "журнал пуст");
+            MiniTestRunner.AreEqual(1000L, wallet.Balance.Rubles, "деньги возвращены ровно один раз");
+
+            // Пустые суммы в сохранении не создают «фантомных» долгов.
+            loaded.RestorePendingRefunds(new[] { Money.Zero });
+            MiniTestRunner.AreEqual(0, loaded.PendingRefundCount, "нулевая сумма отброшена");
         }
 
         /// <summary>Кошелёк, у которого чтение баланса всегда падает.</summary>

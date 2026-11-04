@@ -38,6 +38,9 @@ namespace LifeFromZero.Debts.Tests
             suite.Add("Валидация: незавершённая операция больше задолженности", PendingTooLarge);
             suite.Add("Атомарность: повреждённый снимок не меняет рабочее состояние", CorruptLeavesStateIntact);
 
+            // Регрессия ТЗ №017: валидатор отклонял снимки, которые сервис создаёт сам.
+            suite.Add("Валидация: RefundPending больше остатка — снимок остаётся загружаемым", RefundPendingAboveRemaining);
+
             return suite;
         }
 
@@ -327,6 +330,51 @@ namespace LifeFromZero.Debts.Tests
             MiniTestRunner.AreEqual(37400L, view.TotalRemaining, "остаток прежний");
             MiniTestRunner.AreEqual(1000L, view.PaidTotal, "выплачено прежнее");
             MiniTestRunner.AreEqual(1, service.GetPaymentHistory(DebtTestEnv.DebtId).Count, "история прежняя");
+        }
+
+        /// <summary>
+        /// Дефект: проверка «сумма незавершённой операции не больше задолженности»
+        /// применялась ко всем фазам. Но в фазах DebitConfirmed/RefundPending деньги
+        /// уже списаны, а долг за это время мог уменьшиться — сервис создавал снимок,
+        /// который его же валидатор отклонял, и сохранение становилось незагружаемым
+        /// вместе с единственной записью о деньгах, которые нужно вернуть.
+        /// </summary>
+        private static void RefundPendingAboveRemaining()
+        {
+            var clock = new FakeClock();
+            var wallet = new FakeWallet(0L);
+            DebtService service = DebtTestEnv.CreateService(clock, wallet, null);
+
+            DebtSnapshot snapshot = service.CreateSnapshot();
+            snapshot.PendingOperations = new[]
+            {
+                new PendingOperationSnapshot
+                {
+                    PaymentId = "refund-me",
+                    DebtId = DebtTestEnv.DebtId,
+                    AmountRubles = 50000L, // больше остатка (38 400)
+                    Phase = 2,             // RefundPending: деньги уже списаны
+                    CreatedAtMinutes = 0L
+                }
+            };
+
+            MiniTestRunner.IsTrue(DebtSnapshotValidator.Validate(snapshot, out string error),
+                "снимок с RefundPending больше остатка валиден: " + error);
+            DebtTestEnv.ExpectSuccess(service.RestoreSnapshot(snapshot), "восстановление");
+            MiniTestRunner.AreEqual(1, service.PendingOperationCount, "запись о возврате сохранена");
+
+            // Сбой возврата не теряет запись: деньги всё ещё можно вернуть позже.
+            wallet.ThrowOnRefund = true;
+            MiniTestRunner.IsFalse(service.RetryPendingRecovery(), "возврат при сбое не выполнен");
+            MiniTestRunner.AreEqual(1, service.PendingOperationCount, "запись о деньгах не потеряна");
+
+            // Повторное сохранение по-прежнему валидно и сохраняет фазу и сумму.
+            DebtSnapshot again = service.CreateSnapshot();
+            MiniTestRunner.IsTrue(DebtSnapshotValidator.Validate(again, out string repeatedError),
+                "повторный снимок валиден: " + repeatedError);
+            MiniTestRunner.AreEqual(1, again.PendingOperations.Length, "запись в снимке одна");
+            MiniTestRunner.AreEqual(50000L, again.PendingOperations[0].AmountRubles, "сумма сохранена");
+            MiniTestRunner.AreEqual(2, again.PendingOperations[0].Phase, "фаза RefundPending сохранена");
         }
     }
 }

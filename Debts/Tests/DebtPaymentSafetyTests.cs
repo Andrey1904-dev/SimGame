@@ -40,7 +40,51 @@ namespace LifeFromZero.Debts.Tests
             suite.Add("Регрессия: снимок из обработчика DebtClosed валиден", SnapshotInsideClosedEventValid);
             suite.Add("Регрессия: вложенное восстановление не отменяет операцию в полёте", ReentrantRecoveryKeepsJournal);
 
+            // Регрессия ТЗ №017: загрузка снимка во время незавершённого списания.
+            suite.Add("Регрессия: восстановление снимка во время списания отклонено", RestoreDuringDebitRejected);
+
             return suite;
+        }
+
+        /// <summary>
+        /// Дефект: RestoreSnapshot мог выполниться, пока списание «в полёте».
+        /// Он подменял словарь долгов, и зачёт текущего платежа применялся к объекту
+        /// Debt, которого в сервисе уже нет: деньги списаны, остаток не уменьшен,
+        /// а следующий снимок становится противоречивым.
+        /// </summary>
+        private static void RestoreDuringDebitRejected()
+        {
+            var clock = new FakeClock();
+            var inner = new FakeWallet(50000L);
+            DebtService service = null;
+            DebtResultCode restoreCode = DebtResultCode.Success;
+            bool restoreTouchedState = false;
+
+            var wallet = new ReentrantWallet(inner, () =>
+            {
+                // Адаптер пытается «загрузить игру» прямо во время списания.
+                DebtSnapshot borrowed = service.CreateSnapshot();
+                restoreCode = service.RestoreSnapshot(borrowed).Code;
+                restoreTouchedState = service.PendingOperationCount != 1;
+            });
+
+            service = DebtTestEnv.CreateService(clock, wallet, null);
+            DebtTestEnv.ExpectSuccess(service.TryPay(DebtTestEnv.DebtId, 1000L, "p1"), "платёж");
+
+            MiniTestRunner.AreEqual(DebtResultCode.InvalidState, restoreCode, "восстановление отклонено");
+            MiniTestRunner.IsFalse(restoreTouchedState, "журнал операции в полёте не подменён");
+            MiniTestRunner.AreEqual(0, service.PendingOperationCount, "после зачёта журнал пуст");
+            MiniTestRunner.AreEqual(1, service.GetPaymentHistory(DebtTestEnv.DebtId).Count, "платёж зачтён один раз");
+            MiniTestRunner.AreEqual(49000L, inner.Balance, "списано один раз");
+
+            service.TryGetDebt(DebtTestEnv.DebtId, out DebtView view);
+            MiniTestRunner.AreEqual(1000L, view.PaidTotal, "долг уменьшен на сумму платежа");
+            MiniTestRunner.AreEqual(37400L, view.PrincipalRemaining, "остаток корректен");
+
+            // После завершения операции снимок снова валиден.
+            DebtSnapshot snapshot = service.CreateSnapshot();
+            MiniTestRunner.IsTrue(DebtSnapshotValidator.Validate(snapshot, out string error),
+                "снимок согласован: " + error);
         }
 
         /// <summary>

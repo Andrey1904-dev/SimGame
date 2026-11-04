@@ -68,5 +68,16 @@ namespace LifeFromZero.Phone.Integrations
 
         /// <summary>Суммарный бейдж по приложениям.</summary>
         public int UnreadApps => Apps.TotalUnread;
+
+        /// <summary>
+        /// Синхронизирует бейдж приложения «Сообщения» с числом непрочитанных сообщений.
+        /// Без этого вызова бейдж не отражает доставку через <see cref="Inbox"/>:
+        /// сервис сообщений не знает о реестре приложений (и не должен).
+        /// Вызов идемпотентен; см. <see cref="PhoneBadgeSync"/>.
+        /// </summary>
+        public PhoneResult SyncMessageBadge()
+        {
+            return PhoneBadgeSync.SyncMessagesBadge(Apps, Messages);
+        }
     }
 }
