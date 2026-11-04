@@ -168,6 +168,33 @@ namespace LifeFromZero.Phone.Contacts
             return PhoneResult.Ok(contactId);
         }
 
+        public PhoneBookSnapshot CreateSnapshot()
+        {
+            var entries = new PhoneContactSnapshot[_order.Count];
+            for (int i = 0; i < entries.Length; i++)
+            {
+                var c = _order[i];
+                entries[i] = new PhoneContactSnapshot { Id = c.Id, Name = c.Name, PhoneNumber = c.PhoneNumber, IsAvailable = c.IsAvailable };
+            }
+            return new PhoneBookSnapshot { Version = 1, Contacts = entries };
+        }
+
+        public bool RestoreSnapshot(PhoneBookSnapshot snapshot, out string error)
+        {
+            error = "Invalid contacts snapshot";
+            if (snapshot == null || snapshot.Version != 1 || snapshot.Contacts == null) return false;
+            var staged = new PhoneBook();
+            foreach (var c in snapshot.Contacts)
+            {
+                if (c == null || !PhoneId.IsValid(c.Id) || string.IsNullOrWhiteSpace(c.Name)
+                    || string.IsNullOrWhiteSpace(c.PhoneNumber) || staged._byId.ContainsKey(c.Id)) return false;
+                staged.Add(new PhoneContact(c.Id, c.Name, c.PhoneNumber, c.IsAvailable));
+            }
+            _byId.Clear(); _order.Clear();
+            foreach (var c in staged._order) Add(c);
+            error = null; return true;
+        }
+
         /// <summary>
         /// Стартовые контакты-заглушки не создаются: реальные контакты приходят из игры.
         /// Метод оставлен как точка расширения для конфигурации.

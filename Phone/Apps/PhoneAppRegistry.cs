@@ -187,6 +187,35 @@ namespace LifeFromZero.Phone.Apps
             return PhoneResult.Ok(appId);
         }
 
+        public PhoneAppsSnapshot CreateSnapshot()
+        {
+            var entries = new PhoneAppSnapshot[_order.Count];
+            for (int i = 0; i < entries.Length; i++)
+            {
+                var a = _order[i];
+                entries[i] = new PhoneAppSnapshot { Id = a.Id, Title = a.Title, Category = (int)a.Category, IsAvailable = a.IsAvailable, UnreadCount = a.UnreadCount };
+            }
+            return new PhoneAppsSnapshot { Version = 1, Apps = entries };
+        }
+
+        // Validate and build before replacing: repeated restore is safe and deterministic.
+        public bool RestoreSnapshot(PhoneAppsSnapshot snapshot, out string error)
+        {
+            error = "Invalid apps snapshot";
+            if (snapshot == null || snapshot.Version != 1 || snapshot.Apps == null) return false;
+            var staged = new PhoneAppRegistry();
+            foreach (var a in snapshot.Apps)
+            {
+                if (a == null || !PhoneId.IsValid(a.Id) || string.IsNullOrWhiteSpace(a.Title)
+                    || !Enum.IsDefined(typeof(PhoneAppCategory), a.Category) || a.UnreadCount < 0
+                    || staged._apps.ContainsKey(a.Id)) return false;
+                staged.Register(new PhoneApp(a.Id, a.Title, (PhoneAppCategory)a.Category, a.IsAvailable, a.UnreadCount));
+            }
+            _apps.Clear(); _order.Clear();
+            foreach (var a in staged._order) Register(a);
+            error = null; return true;
+        }
+
         private void Replace(PhoneApp updated)
         {
             _apps[updated.Id] = updated;

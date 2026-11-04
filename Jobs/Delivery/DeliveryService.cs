@@ -18,8 +18,8 @@ namespace LifeFromZero.Jobs.Delivery
     /// Атомарность выплаты: состояние заказа переводится в Completed только после успешного
     /// <see cref="IPayoutAdapter.TryCredit"/>. Если начисление вернуло false или упало,
     /// заказ остаётся в PickedUp, выплата не считается сделанной — повторный вызов Complete
-    /// может начислить деньги позже. Флаг <see cref="DeliveryStatus.PayoutGranted"/> гарантирует,
-    /// что при успехе начисление происходит ровно один раз.
+    /// может начислить деньги позже. Флаг <see cref="DeliveryStatus.PayoutGranted"/> защищает только сохранённое состояние.
+    /// Для защиты между начислением и сохранением нужен IIdempotentPayoutAdapter и атомарный кошелёк.
     ///
     /// Слот активного заказа (<see cref="ActiveOrderId"/>) — производная величина от состояний
     /// заказов, а не независимое поле: при приёме он сверяется с <see cref="FindActiveEntry"/>.
@@ -281,7 +281,11 @@ namespace LifeFromZero.Jobs.Delivery
 
             long payment = entry.Order.PaymentRubles;
             bool paid;
-            if (!SafeAdapter.Try(() => payout.TryCredit(payment), out paid))
+            var idempotent = payout as IIdempotentPayoutAdapter;
+            // Legacy adapter remains supported, but cannot protect crash/retry.
+            if (!SafeAdapter.Try(() => idempotent != null
+                ? idempotent.TryCredit("delivery:" + entry.Order.Id, payment)
+                : payout.TryCredit(payment), out paid))
             {
                 return DeliveryResult.Failure(
                     DeliveryResultCode.AdapterFailure, entry.ToStatus(), now);
