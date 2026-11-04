@@ -27,6 +27,7 @@ namespace LifeFromZero.City.Quarter.Tests
             suite.Add("Стресс: 118 seed (0, отрицательные, экстремальные) — состав и границы", StressManySeeds);
             suite.Add("Стресс: ворота частных домов у улицы, а не в глубине блока", PrivateGatesNearStreet);
             suite.Add("Стресс: невыполнимая конфигурация — понятная диагностика, не битый квартал", ImpossibleConfigDiagnosed);
+            suite.Add("Bootstrap: контракт диагностики seed=1904 (поля отчёта = счётчики плана)", BootstrapReportContract);
             return suite;
         }
 
@@ -226,6 +227,25 @@ namespace LifeFromZero.City.Quarter.Tests
             }
             catch (System.ArgumentOutOfRangeException) { thrown = true; }
             IsTrue(thrown, "Отрицательная квота отклоняется в Validate");
+        }
+
+        private static void BootstrapReportContract()
+        {
+            // CityBootstrap (UnityAdapter) заполняет CityGenerationReport из
+            // плана: проверяем, что данные для отчёта существуют и согласованы.
+            QuarterPlan plan = QuarterGenerator.Generate(1904);
+            AreEqual(1904, plan.Seed, "Seed отчёта");
+            AreEqual(15, plan.Buildings.Count, "ResidentialBuildings отчёта = 15");
+            IsTrue(plan.Objects.Count > 0, "TotalObjects отчёта положителен: " + plan.Objects.Count);
+            int entrances = 0;
+            foreach (BuildingInfo b in plan.Buildings) entrances += b.Entrances.Count;
+            AreEqual(entrances, plan.DeliveryPoints.Count,
+                "DeliveryPoints отчёта = число входов (точка у каждого входа)");
+            // Повторный вызов Generate() у Bootstrap опирается на независимость
+            // повторной генерации ядра: два плана по одному seed идентичны.
+            AreEqual(QuarterPlanSerializer.Serialize(plan),
+                     QuarterPlanSerializer.Serialize(QuarterGenerator.Generate(1904)),
+                     "Повторная генерация для повторного Build() детерминирована");
         }
 
         private static void BasementPhysicalObjects()

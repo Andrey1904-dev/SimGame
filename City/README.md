@@ -1,6 +1,7 @@
 # City/Quarter — генератор городского квартала (ТЗ №023)
 
 **Итоговый отчёт по всему модулю: `FINAL_REPORT.md`** (статистика seed=1904, готовность к Unity, план интеграции для Codex).
+**Интеграция в Unity для Codex: `CODEX_INTEGRATION.md`, готовое задание: `CODEX_TASK.md`. Точка запуска в сцене — компонент `CityBootstrap` (один на пустой GameObject, seed=1904, отчёт генерации в Inspector).**
 
 Автономный C#-генератор российского спального района 250×250 м для
 последующего подключения к Unity 6 URP. Существующие модули
@@ -41,7 +42,7 @@
 | `Quarter/City.Quarter.asmdef` | Сборка `LifeFromZero.City.Quarter`, `noEngineReferences: true` |
 | `UnityAdapter/QuarterUnityAdapter.cs` | Единственный файл с UnityEngine: строит GameObject/примитивы/материалы/коллайдеры по плану; префабы по TypeId — через `prefabOverrides` |
 | `UnityAdapter/City.Quarter.UnityAdapter.asmdef` | Сборка адаптера, ссылается на ядро |
-| `Tests/` | 66 тестов (MiniTestRunner + NUnit-обёртка для Unity), `Console.csproj` для прогона вне Unity; ПВЗ — `PickupPointTests.cs`, развитие города — `CityExpansionTests.cs`, жильё — `HousingTests.cs`, разнообразие — `ArchitectureVarietyTests.cs`, финал — `FinalCityTests.cs`, аудит — `AuditTests.cs` |
+| `Tests/` | 67 тестов (MiniTestRunner + NUnit-обёртка для Unity), `Console.csproj` для прогона вне Unity; ПВЗ — `PickupPointTests.cs`, развитие города — `CityExpansionTests.cs`, жильё — `HousingTests.cs`, разнообразие — `ArchitectureVarietyTests.cs`, финал — `FinalCityTests.cs`, аудит — `AuditTests.cs` |
 
 
 ## Развитие города (ТЗ №024)
@@ -128,9 +129,13 @@ flat-canopy/sloped-canopy/porch, цвета дверей подъездов. Г�
 1. Скопировать папку `City/` в `Assets/` Unity-проекта (Unity 6, URP).
 2. Ядро соберётся как `LifeFromZero.City.Quarter`, адаптер — как
    `LifeFromZero.City.Quarter.UnityAdapter`.
-3. На пустой объект сцены повесить `QuarterUnityAdapter`, задать Seed —
-   квартал построится при старте. Программно:
-   `new QuarterUnityAdapter().Build(QuarterGenerator.Generate(seed), transform)`.
+3. На пустой объект сцены повесить **`CityBootstrap`** (рекомендуемый путь,
+   ТЗ №028): Seed=1904, Generate On Start — город построится при Play,
+   сводка (здания/объекты/доставка/ошибки/время/повторный Build) — в поле
+   Last Report и в Console. Адаптер Bootstrap подключит сам. Вручную
+   адаптером тоже можно: повесить `QuarterUnityAdapter`, задать Seed —
+   квартал построится при старте; программно:
+   `adapter.Build(QuarterGenerator.Generate(seed), transform)`.
 4. Для продакшен-вида заменить примитивы префабами в `prefabOverrides`
    (ключи — TypeId: `building`, `tree`, `lamp.street` и т.д.). Материалы
    адаптера процедурные, шейдер `Universal Render Pipeline/Lit`
@@ -174,7 +179,7 @@ dotnet run --project City/Tests/Console.csproj
 ```
 
 В этой сессии прогон выполнен эквивалентно: автономный модуль + тесты
-скомпилированы Roslyn (C# 8) и запущены на .NET Core 3.1 — **66/66 PASS**
+скомпилированы Roslyn (C# 8) и запущены на .NET Core 3.1 — **67/67 PASS**
 (дороги и связность графа, переходы/разметка, дома вне проезжей части и
 без пересечений, подъезды, комплектность дворов, проезды, фонари,
 повторяемость по seed на seed=42 и серия seed 1..10, расширяемость;

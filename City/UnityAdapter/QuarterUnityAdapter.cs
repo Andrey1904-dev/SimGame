@@ -41,6 +41,31 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         [Header("Префабы (необязательно; пусто = примитивы)")]
         [SerializeField] private List<QuarterPrefabOverride> prefabOverrides = new List<QuarterPrefabOverride>();
 
+        /// <summary>Seed генерации (то же поле, что в Inspector). Для CityBootstrap и кода.</summary>
+        public int Seed { get => seed; set => seed = value; }
+        /// <summary>Строить ли квартал автоматически в Start (то же поле, что в Inspector).</summary>
+        public bool BuildOnStart { get => buildOnStart; set => buildOnStart = value; }
+        /// <summary>Ставить ли коллайдеры (то же поле, что в Inspector).</summary>
+        public bool AddColliders { get => addColliders; set => addColliders = value; }
+        /// <summary>Текущий построенный корень квартала (null, если не построен или очищен).</summary>
+        public GameObject BuiltRoot => _builtRoot;
+
+        /// <summary>
+        /// Уничтожает построенный квартал и его меши деталей. Материалы кэша
+        /// принадлежат адаптеру и освобождаются в OnDestroy, а не здесь.
+        /// </summary>
+        public void ClearBuilt()
+        {
+            if (_builtRoot != null)
+            {
+                Destroy(_builtRoot);
+                _builtRoot = null;
+            }
+            foreach (Mesh mesh in _createdMeshes)
+                if (mesh != null) Destroy(mesh);
+            _createdMeshes.Clear();
+        }
+
         private readonly Dictionary<string, Material> _materials = new Dictionary<string, Material>();
         private readonly Dictionary<string, GameObject> _prefabs = new Dictionary<string, GameObject>();
         // Меши деталей зданий создаются кодом и не уничтожаются вместе с
@@ -49,6 +74,9 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
 
         private void OnDestroy()
         {
+            // Корень мог быть построен под чужим родителем — уничтожаем явно,
+            // чтобы квартал не остался сиротой после уничтожения адаптера.
+            if (_builtRoot != null) Destroy(_builtRoot);
             foreach (Mesh mesh in _createdMeshes)
                 if (mesh != null) Destroy(mesh);
             _createdMeshes.Clear();
@@ -74,15 +102,8 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         {
             if (plan == null) throw new System.ArgumentNullException(nameof(plan));
 
-            if (_builtRoot != null)
-            {
-                Destroy(_builtRoot);
-                _builtRoot = null;
-                // Меши деталей принадлежали уничтоженному кварталу.
-                foreach (Mesh mesh in _createdMeshes)
-                    if (mesh != null) Destroy(mesh);
-                _createdMeshes.Clear();
-            }
+            // Повторный Build: предыдущий квартал и его меши уничтожаются.
+            ClearBuilt();
 
             _prefabs.Clear();
             foreach (QuarterPrefabOverride o in prefabOverrides)
