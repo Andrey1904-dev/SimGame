@@ -38,6 +38,7 @@ namespace LifeFromZero.Jobs.Tests
             suite.Add("Доставка: повторное завершение отклоняется без выплаты", RepeatedComplete);
             suite.Add("Доставка: повторное получение груза отклоняется", RepeatedPickUp);
             suite.Add("Доставка: повторное принятие заказа отклоняется", RepeatedAccept);
+            suite.Add("Доставка: неудачная попытка взять второй заказ не меняет его состояние", SecondAcceptAttemptDoesNotMutateRequestedOrder);
             suite.Add("Доставка: неверная точка получения", WrongPickupLocation);
             suite.Add("Доставка: неверная точка доставки", WrongDropOffLocation);
             suite.Add("Доставка: завершение до получения груза", CompleteBeforePickUp);
@@ -59,6 +60,16 @@ namespace LifeFromZero.Jobs.Tests
             suite.Add("Доставка: регистрация заказа и дубликаты", RegisterOrder);
             suite.Add("Доставка: некорректные данные заказа", InvalidOrderData);
             suite.Add("Доставка: без адаптера времени — DeliveryServiceException", ServiceRequiresAdapters);
+
+            // Регрессионные тесты аудита ТЗ №015 (найденные дефекты и границы времени).
+            suite.Add("Доставка: второй активный заказ не маскирует просрочку", ActiveOrderDoesNotMaskExpiry);
+            suite.Add("Доставка: зависший слот не блокирует новые заказы", StaleActiveSlotDoesNotLockPlayer);
+            suite.Add("Доставка: скачок времени на огромную величину", HugeTimeJump);
+            suite.Add("Доставка: ровно в срок — успех, на минуту позже — провал", DeadlineBoundary);
+            suite.Add("Доставка: повторная отмена не меняет состояние", RepeatedCancel);
+            suite.Add("Доставка: Abandon после получения груза и до принятия", AbandonOnlyWhileAccepted);
+            suite.Add("Доставка: Refresh после завершения не платит повторно", RefreshAfterCompletion);
+            suite.Add("Доставка: выплата ровно один раз при многократных операциях", PayoutOnceUnderMixedCalls);
 
             return suite;
         }
@@ -289,7 +300,41 @@ namespace LifeFromZero.Jobs.Tests
 
             MiniTestRunner.IsTrue(first.IsSuccess, "первое принятие успешно");
             MiniTestRunner.AreEqual(DeliveryResultCode.InvalidState, second.Code, "повторное принятие отклонено");
+
+            // Аудит ТЗ №015: ForbidAcceptingSecondOrder — попытка взять другой заказ при активном
+            // первом не должна менять состояние запрошенного заказа. Если заказ уже был
+            // Accepted, проверка чужого активного заказа не должна подменять код InvalidState.
+            DeliveryOrder other = NewOrder("order-2", payment: 100L);
+            service.RegisterOrder(other);
+            MiniTestRunner.AreEqual(
+                DeliveryResultCode.InvalidState,
+                service.Accept(order.Id, clock).Code,
+                "повторное принятие при активном заказе даёт InvalidState, а не AlreadyHasActiveOrder");
         }
+
+        /// <summary>
+        /// Регрессия ТЗ №015 (сценарий ForbidAcceptingSecondOrder): попытка взять второй заказ
+        /// при активном первом не должна ни сжигать запрошенный Available-заказ,
+        /// ни подменять причину отказа.
+        /// </summary>
+        private static void SecondAcceptAttemptDoesNotMutateRequestedOrder()
+        {
+            IDeliveryService service = NewServiceWithOrder(out DeliveryOrder first, deadline: 500L);
+            var clock = new FakeClock(0d);
+            DeliveryOrder second = NewOrder("order-2", payment: 100L, deadline: 10L);
+            service.RegisterOrder(second);
+
+            MiniTestRunner.IsTrue(service.Accept(first.Id, clock).IsSuccess, "первый заказ принят");
+
+            clock.Advance(11d); // срок второго заказа истёк
+            DeliveryResult attempt = service.Accept(second.Id, clock);
+
+            MiniTestRunner.AreEqual(DeliveryResultCode.AlreadyHasActiveOrder, attempt.Code, "отказ по активному заказу");
+            MiniTestRunner.AreEqual(
+                DeliveryOrderState.Available, attempt.Status.State,
+                "запрошенный заказ не переведён в Failed побочным эффектом");
+        }
+
 
         // ---------- 4. Неверная точка ----------
 
@@ -603,6 +648,185 @@ namespace LifeFromZero.Jobs.Tests
                 "без начисления Complete бросает DeliveryServiceException");
             MiniTestRunner.IsTrue(Throws<DeliveryServiceException>(() => service.Cancel(order.Id, null)),
                 "без часов Cancel бросает DeliveryServiceException");
+        }
+
+        // ---------- Регрессия аудита ТЗ №015 ----------
+
+        /// <summary>
+        /// Дефект: просроченный Available-заказ при уже имеющемся активном заказе возвращал
+        /// DeadlineExpired и переводил заказ в Failed — то есть чужой активный заказ маскировал
+        /// причину отказа («уже есть заказ»), а правило «один активный заказ» обходилось
+        /// побочным эффектом. Теперь приоритет у AlreadyHasActiveOrder, состояние не меняется.
+        /// </summary>
+        private static void ActiveOrderDoesNotMaskExpiry()
+        {
+            IDeliveryService service = NewServiceWithOrder(out DeliveryOrder first, deadline: 500L);
+            var clock = new FakeClock(0d);
+            var second = new DeliveryOrder(
+                "order-2", "Лапша", new DeliveryPoint(Bakery, "Пекарня"),
+                new DeliveryPoint(Office, "Офис"), 90L, 10L);
+            service.RegisterOrder(second);
+
+            MiniTestRunner.IsTrue(service.Accept(first.Id, clock).IsSuccess, "первый заказ принят");
+            clock.Advance(11d); // срок второго заказа истёк, срок первого — нет
+
+            DeliveryResult result = service.Accept(second.Id, clock);
+
+            MiniTestRunner.AreEqual(DeliveryResultCode.AlreadyHasActiveOrder, result.Code, "причина отказа — активный заказ");
+            MiniTestRunner.AreEqual(DeliveryOrderState.Available, result.Status.State, "состояние заказа не изменено");
+            MiniTestRunner.IsTrue(
+                service.GetStatus("order-2").Status.ClosedAtMinutes == null,
+                "заказ не закрыт побочным эффектом");
+            MiniTestRunner.AreEqual(first.Id, service.ActiveOrderId, "активный заказ прежний");
+        }
+
+        /// <summary>
+        /// Дефект: слот активного заказа хранился отдельным полем и мог «зависнуть» на закрытом
+        /// заказе — тогда Accept навсегда отвечал AlreadyHasActiveOrder, и играть было нельзя.
+        /// Слот теперь выводится из фактических состояний заказов.
+        /// Имитация такого состояния — подмена приватного поля через рефлексию
+        /// (публичного API для повреждения слота нет и не должно быть).
+        /// </summary>
+        private static void StaleActiveSlotDoesNotLockPlayer()
+        {
+            var service = new DeliveryService();
+            var clock = new FakeClock(0d);
+            service.RegisterOrder(NewOrder("order-1"));
+            service.RegisterOrder(NewOrder("order-2"));
+
+            MiniTestRunner.IsTrue(service.Accept("order-1", clock).IsSuccess, "заказ принят");
+            MiniTestRunner.IsTrue(ForceActiveSlot(service, "order-2"), "слот подменён на закрытый заказ");
+            MiniTestRunner.IsTrue(service.Cancel("order-1", clock).IsSuccess, "первый заказ отменён");
+
+            DeliveryResult result = service.Accept("order-2", clock);
+
+            MiniTestRunner.IsTrue(result.IsSuccess, "зависший слот не блокирует выдачу нового заказа");
+            MiniTestRunner.AreEqual("order-2", service.ActiveOrderId, "слот указывает на новый заказ");
+        }
+
+        private static bool ForceActiveSlot(DeliveryService service, string orderId)
+        {
+            var field = typeof(DeliveryService).GetField(
+                "_activeOrderId",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+            if (field == null)
+            {
+                return false;
+            }
+
+            field.SetValue(service, orderId);
+            return true;
+        }
+
+        /// <summary>Скачок времени (сон, ускорение, рассинхрон часов) не должен платить за просрочку.</summary>
+        private static void HugeTimeJump()
+        {
+            IDeliveryService service = ToPickedUp(
+                out DeliveryOrder order, out FakeClock clock, out FakeLedger ledger, out FakeLocation location);
+
+            clock.NowMinutes = 1e18d;
+            DeliveryResult completed = service.Complete(order.Id, clock, location, ledger);
+
+            MiniTestRunner.AreEqual(DeliveryResultCode.DeadlineExpired, completed.Code, "гигантский скачок = просрочка");
+            MiniTestRunner.AreEqual(0L, ledger.Credited, "денег не начислено");
+            MiniTestRunner.IsTrue(service.ActiveOrderId == null, "слот освобождён");
+        }
+
+        /// <summary>Граница срока: now == deadline — ещё успех, теперь &gt; deadline — провал.</summary>
+        private static void DeadlineBoundary()
+        {
+            IDeliveryService exact = ToPickedUp(
+                out DeliveryOrder first, out FakeClock exactClock, out FakeLedger exactLedger,
+                out FakeLocation exactLocation, deadline: 100L);
+
+            exactClock.NowMinutes = 100d;
+            MiniTestRunner.IsTrue(
+                exact.Complete(first.Id, exactClock, exactLocation, exactLedger).IsSuccess,
+                "ровно в срок доставка разрешена");
+
+            IDeliveryService late = ToPickedUp(
+                out DeliveryOrder second, out FakeClock lateClock, out FakeLedger lateLedger,
+                out FakeLocation lateLocation, deadline: 100L);
+
+            lateClock.NowMinutes = 100.001d;
+            MiniTestRunner.AreEqual(
+                DeliveryResultCode.DeadlineExpired,
+                late.Complete(second.Id, lateClock, lateLocation, lateLedger).Code,
+                "через мгновение после срока — провал");
+        }
+
+        private static void RepeatedCancel()
+        {
+            IDeliveryService service = NewServiceWithOrder(out DeliveryOrder order);
+            var clock = new FakeClock(0d);
+            var ledger = new FakeLedger();
+
+            MiniTestRunner.IsTrue(service.Cancel(order.Id, clock).IsSuccess, "первая отмена успешна");
+            DeliveryResult second = service.Cancel(order.Id, clock);
+            DeliveryResult third = service.Cancel(order.Id, clock);
+
+            MiniTestRunner.AreEqual(DeliveryResultCode.InvalidState, second.Code, "вторая отмена отклонена");
+            MiniTestRunner.AreEqual(DeliveryResultCode.InvalidState, third.Code, "третья отмена отклонена");
+            MiniTestRunner.AreEqual(DeliveryOrderState.Cancelled, third.Status.State, "состояние не изменилось");
+            MiniTestRunner.AreEqual(0L, ledger.Credited, "выплат не было");
+            MiniTestRunner.AreEqual(0, ledger.CreditCalls, "начисление не вызывалось");
+        }
+
+        private static void AbandonOnlyWhileAccepted()
+        {
+            IDeliveryService available = NewServiceWithOrder(out DeliveryOrder order);
+            var clock = new FakeClock(0d);
+
+            MiniTestRunner.AreEqual(
+                DeliveryResultCode.InvalidState, available.Abandon(order.Id, clock).Code,
+                "нельзя бросить непринятый заказ");
+
+            IDeliveryService picked = ToPickedUp(
+                out DeliveryOrder pickedOrder, out FakeClock pickedClock,
+                out FakeLedger ledger, out FakeLocation location);
+
+            MiniTestRunner.AreEqual(
+                DeliveryResultCode.InvalidState, picked.Abandon(pickedOrder.Id, pickedClock).Code,
+                "нельзя бросить заказ с грузом");
+            MiniTestRunner.AreEqual(pickedOrder.Id, picked.ActiveOrderId, "заказ остался активным");
+        }
+
+        private static void RefreshAfterCompletion()
+        {
+            IDeliveryService service = ToPickedUp(
+                out DeliveryOrder order, out FakeClock clock, out FakeLedger ledger, out FakeLocation location);
+
+            MiniTestRunner.IsTrue(service.Complete(order.Id, clock, location, ledger).IsSuccess, "заказ завершён");
+            clock.Advance(10_000d);
+
+            DeliveryResult refreshed = service.Refresh(order.Id, clock);
+
+            MiniTestRunner.IsTrue(refreshed.IsSuccess, "Refresh закрытого заказа ничего не ломает");
+            MiniTestRunner.AreEqual(DeliveryOrderState.Completed, refreshed.Status.State, "состояние осталось Completed");
+            MiniTestRunner.IsTrue(refreshed.Status.PayoutGranted, "флаг выплаты сохранён");
+            MiniTestRunner.AreEqual(1, ledger.CreditCalls, "повторной выплаты не было");
+            MiniTestRunner.AreEqual(150L, ledger.Credited, "сумма не изменилась");
+        }
+
+        private static void PayoutOnceUnderMixedCalls()
+        {
+            IDeliveryService service = ToPickedUp(
+                out DeliveryOrder order, out FakeClock clock, out FakeLedger ledger, out FakeLocation location);
+
+            for (int i = 0; i < 5; i++)
+            {
+                service.Refresh(order.Id, clock);
+                service.GetStatus(order.Id);
+                service.Complete(order.Id, clock, location, ledger);
+                service.PickUp(order.Id, clock, location);
+                service.Cancel(order.Id, clock);
+            }
+
+            MiniTestRunner.AreEqual(1, ledger.CreditCalls, "выплата ровно одна");
+            MiniTestRunner.AreEqual(150L, ledger.Credited, "сумма ровно одна");
+            MiniTestRunner.AreEqual(DeliveryOrderState.Completed, service.GetStatus(order.Id).Status.State, "заказ завершён");
+            MiniTestRunner.IsTrue(service.ActiveOrderId == null, "слот освобождён");
         }
 
         private static bool Throws<TException>(Action action) where TException : Exception

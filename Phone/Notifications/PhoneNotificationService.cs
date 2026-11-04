@@ -223,6 +223,36 @@ namespace LifeFromZero.Phone.Notifications
             return PhoneResult.Ok(null);
         }
 
+        /// <summary>
+        /// Полностью заменяет содержимое сервиса готовыми уведомлениями.
+        /// Вызывается только <see cref="PhoneNotificationsRestore"/> после проверки снимка.
+        /// Намеренно <c>internal</c>: обойти дедупликацию ID снаружи нельзя.
+        /// </summary>
+        internal void ReplaceAll(IReadOnlyList<PhoneNotification> notifications)
+        {
+            if (notifications == null)
+            {
+                throw new ArgumentNullException(nameof(notifications));
+            }
+
+            _byId.Clear();
+            _order.Clear();
+
+            for (int i = 0; i < notifications.Count; i++)
+            {
+                PhoneNotification notification = notifications[i];
+
+                if (notification == null || _byId.ContainsKey(notification.Id))
+                {
+                    throw new PhoneIntegrationException(
+                        "Повреждённый набор уведомлений при восстановлении: " + (notification == null ? "<null>" : notification.Id));
+                }
+
+                _byId.Add(notification.Id, notification);
+                _order.Add(notification);
+            }
+        }
+
         public PhoneNotificationsSnapshot CreateSnapshot()
         {
             var items = new List<PhoneNotificationSnapshot>(_order.Count);

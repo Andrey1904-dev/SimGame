@@ -25,6 +25,13 @@ namespace LifeFromZero.Economy.Core
         InventoryRejected = 4,
 
         /// <summary>Внутренняя ошибка модуля или адаптера. Деньги и предметы не изменены.</summary>
-        InternalError = 5
+        InternalError = 5,
+
+        /// <summary>
+        /// Есть незавершённый возврат денег: предыдущая покупка списала средства, но вернуть их
+        /// не удалось. Новая покупка не начинается, пока компенсация не закрыта
+        /// (<see cref="LifeFromZero.Economy.Shop.ShopService.RetryPendingRefunds"/>).
+        /// </summary>
+        PendingRefund = 6
     }
 }

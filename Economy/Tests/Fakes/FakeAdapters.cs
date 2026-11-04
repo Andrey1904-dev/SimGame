@@ -45,6 +45,15 @@ namespace LifeFromZero.Economy.Tests.Fakes
         /// <summary>Если true, <see cref="TryRefund"/> бросает исключение.</summary>
         public bool ThrowOnRefund { get; set; }
 
+        /// <summary>
+        /// Сколько ближайших вызовов <see cref="TryRefund"/> должны вернуть false
+        /// (имитация временного сбоя: следующий возврат проходит).
+        /// </summary>
+        public int RefundFailuresRemaining { get; set; }
+
+        /// <summary>Сколько ближайших вызовов <see cref="TryRefund"/> должны бросить исключение.</summary>
+        public int RefundThrowsRemaining { get; set; }
+
         public bool TrySpend(Money amount)
         {
             SpendCalls++;
@@ -72,9 +81,21 @@ namespace LifeFromZero.Economy.Tests.Fakes
         {
             RefundCalls++;
 
+            if (RefundThrowsRemaining > 0)
+            {
+                RefundThrowsRemaining--;
+                throw new InvalidOperationException("Тестовый сбой кошелька при возврате.");
+            }
+
             if (ThrowOnRefund)
             {
                 throw new InvalidOperationException("Тестовый сбой кошелька при возврате.");
+            }
+
+            if (RefundFailuresRemaining > 0)
+            {
+                RefundFailuresRemaining--;
+                return false;
             }
 
             if (RefundOverride.HasValue)

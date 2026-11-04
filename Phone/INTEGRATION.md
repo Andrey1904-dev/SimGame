@@ -40,7 +40,7 @@
 | `Phone/Integrations/WorkSummaryService.cs` | `Assets/Phone/Integrations/WorkSummaryService.cs` | Экран «Работа» |
 | `Phone/Integrations/StorySummaryService.cs` | `Assets/Phone/Integrations/StorySummaryService.cs` | Сюжетные записи |
 | `Phone/Integrations/PhoneFacade.cs` | `Assets/Phone/Integrations/PhoneFacade.cs` | Сборка всех сервисов |
-| `Phone/Tests/*` | `Assets/Phone/Tests/*` | 79 тестов, раннер, NUnit-обёртка |
+| `Phone/Tests/*` | `Assets/Phone/Tests/*` | 90 тестов, раннер, NUnit-обёртка |
 | `Phone/Tests/Console.csproj`, `Program.cs` | *не переносить в Unity* | Запуск вне Unity |
 
 **Файлы, которые пишет Codex (адаптеры к существующим системам):**
@@ -346,14 +346,30 @@ PhoneMessagesSnapshot      messages      = phone.Messages.CreateSnapshot();
 PhoneNotificationsSnapshot notifications = phone.Notifications.CreateSnapshot();
 ```
 
-Внутри — только простые поля (`string`, `enum`, `bool`, `GameMinutes`), которые
-сериализуются любым способом (`JsonUtility`, `System.Text.Json`, собственный формат).
-Восстановление (десериализация → регистрация) — задача Codex: ядро менять не нужно,
-достаточно методов `Register` / `Add` / `ReceiveFromContact`.
+Внутри — только простые поля (`string`, `enum`, `bool`, `GameMinutes`).
+**Восстановление есть в ядре** (аудит ТЗ №015):
 
-**Ограничение:** сейчас нет метода «восстановить снимок разом». Если понадобится —
-добавьте отдельный `RestoreSnapshot` на стороне Codex (интерфейсы открыты), либо
-восстанавливайте по одному элементу через существующие методы.
+```csharp
+string error;
+var messages = new PhoneMessageService();
+if (!PhoneMessagesRestore.RestoreInto(messages, savedMessages, out error).IsSuccess)
+{
+    // снимок отклонён, сервис не изменён
+}
+
+var notifications = new PhoneNotificationService();
+PhoneNotificationsRestore.RestoreInto(notifications, savedNotifications, out error);
+```
+
+Проверки при восстановлении: непустые ID, отсутствие дублей ID и переписок, принадлежность
+сообщения своей переписке, непустой текст, «исходящее всегда прочитано», известный тип
+уведомления, непустые источник/заголовок/текст. Невалидный снимок не меняет сервис
+целиком (никаких частично загруженных данных).
+
+**Важно для Unity:** `JsonUtility` не сериализует `GameMinutes` (readonly-структура
+с приватными полями) и не поддерживает классы с readonly-свойствами. Используйте
+`System.Text.Json`/собственные DTO с публичными полями: `string id`, `int direction`,
+`bool hasTime`, `double minutes`, `bool isRead`. Пример есть в `../INTEGRATION_AUDIT.md` §9.5.
 
 ---
 
@@ -372,7 +388,7 @@ PhoneNotificationsSnapshot notifications = phone.Notifications.CreateSnapshot();
 cd Phone/Tests && dotnet run --project Console.csproj
 ```
 
-Ожидаемо: **79 тестов**, все PASS (фактически не проверялось).
+Ожидаемо: **90 тестов**, все PASS (фактически не проверялось).
 
 ---
 
@@ -390,7 +406,7 @@ cd Phone/Tests && dotnet run --project Console.csproj
 | 6. Интерфейсы к GameClock/MoneyWallet/Delivery/долгам/сюжету | `Core/IPhoneClock.cs`, `Notifications/ExternalAdapters.cs` |
 | 6. Телефон не меняет деньги/заказы/флаги | все источники read-only |
 | 7. Пустые ID, дубли, неизвестные контакты, повторное прочтение, пустая история, ошибки адаптеров, переполнение, плохое время | коды `PhoneResultCode` |
-| 8. ≥ 25 тестов | 79 тестов в `Tests/*` |
+| 8. ≥ 25 тестов | 90 тестов в `Tests/*` |
 | 9. Структура каталогов, README, INTEGRATION | соблюдено |
 | 10. Чистый C#, Unity 6000, без MonoBehaviour/UI/NuGet, `Economy/` и `Jobs/` не тронуты | asmdef `noEngineReferences`, `LangVersion 9` |
 

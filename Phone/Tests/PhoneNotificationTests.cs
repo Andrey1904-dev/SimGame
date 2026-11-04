@@ -36,6 +36,158 @@ namespace LifeFromZero.Phone.Tests
             suite.Add("Уведомления: хаб только в общий список", HubInboxOnly);
             suite.Add("Уведомления: все шесть типов поддерживаются", AllTypes);
             suite.Add("Уведомления: сводные счётчики фасада", FacadeCounters);
+
+            // Регрессионные тесты аудита ТЗ №015.
+            suite.Add("Уведомления: восстановление из снимка", RestoreFromSnapshot);
+            suite.Add("Уведомления: битый снимок не меняет сервис", RestoreRejectsBrokenSnapshot);
+            suite.Add("Уведомления: повторный Push после отказа бейджа не дублирует", HubBadgeFailureKeepsSingleNotification);
+            suite.Add("Уведомления: снимок защищён от мутации вызывающим кодом", SnapshotIsDefensiveCopy);
+        }
+
+        // ---------- Восстановление и устойчивость (ТЗ №015) ----------
+
+        private static void RestoreFromSnapshot()
+        {
+            var source = new PhoneNotificationService();
+            source.Add("n1", "bank", PhoneNotificationType.Bank, "Баланс", "Начисление", new FakePhoneClock(5d));
+            source.Add("n2", "work", PhoneNotificationType.Job, "Заказ", "Новый заказ", new FakePhoneClock(6d));
+            source.MarkRead("n2");
+
+            var target = new PhoneNotificationService();
+            string error;
+            PhoneResult restored = PhoneNotificationsRestore.RestoreInto(target, source.CreateSnapshot(), out error);
+
+            MiniTestRunner.IsTrue(restored.IsSuccess, "снимок восстановлен: " + error);
+            MiniTestRunner.AreEqual(2, target.Notifications.Count, "два уведомления");
+            MiniTestRunner.AreEqual(1, target.UnreadCount, "непрочитанное одно");
+            MiniTestRunner.IsTrue(target.Get("n2").Value.IsRead, "статус прочтения восстановлен");
+            MiniTestRunner.AreEqual(PhoneNotificationType.Bank, target.Get("n1").Value.Type, "тип восстановлен");
+            MiniTestRunner.AreEqual(5d, target.Get("n1").Value.CreatedAt.Minutes, "время восстановлено");
+
+            // Повторный Push с восстановленным ID не должен создать дубликат.
+            PhoneResult duplicate = target.Add("n1", "bank", PhoneNotificationType.Bank, "Баланс", "Ещё", new FakePhoneClock(7d));
+            MiniTestRunner.AreEqual(PhoneResultCode.DuplicateId, duplicate.Code, "дедупликация работает после восстановления");
+            MiniTestRunner.AreEqual(2, target.Notifications.Count, "количество не изменилось");
+        }
+
+        private static void RestoreRejectsBrokenSnapshot()
+        {
+            var target = new PhoneNotificationService();
+            target.Add("live", "bank", PhoneNotificationType.Bank, "Живое", "Текст", new FakePhoneClock(1d));
+
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.InvalidArgument,
+                PhoneNotificationsRestore.RestoreInto(target, null, out string e1).Code,
+                "null-снимок отклонён");
+
+            var duplicate = new PhoneNotificationsSnapshot(new List<PhoneNotificationSnapshot>
+            {
+                new PhoneNotificationSnapshot("n1", "bank", PhoneNotificationType.Bank, "Раз", "Т", GameMinutes.Unknown, false),
+                new PhoneNotificationSnapshot("n1", "bank", PhoneNotificationType.Bank, "Два", "Т", GameMinutes.Unknown, false)
+            });
+
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.DuplicateId,
+                PhoneNotificationsRestore.RestoreInto(target, duplicate, out string e2).Code,
+                "дубль ID отклонён");
+
+            var unknownType = new PhoneNotificationsSnapshot(new List<PhoneNotificationSnapshot>
+            {
+                new PhoneNotificationSnapshot("n1", "bank", (PhoneNotificationType)42, "Заголовок", "Т", GameMinutes.Unknown, false)
+            });
+
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.InvalidArgument,
+                PhoneNotificationsRestore.RestoreInto(target, unknownType, out string e3).Code,
+                "неизвестный тип отклонён");
+
+            var emptySource = new PhoneNotificationsSnapshot(new List<PhoneNotificationSnapshot>
+            {
+                new PhoneNotificationSnapshot("n1", "  ", PhoneNotificationType.Bank, "Заголовок", "Т", GameMinutes.Unknown, false)
+            });
+
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.InvalidArgument,
+                PhoneNotificationsRestore.RestoreInto(target, emptySource, out string e4).Code,
+                "пустой источник отклонён");
+
+            MiniTestRunner.AreEqual(1, target.Notifications.Count, "живое уведомление не тронуто");
+            MiniTestRunner.AreEqual(1, target.UnreadCount, "счётчик не сброшен");
+        }
+
+        /// <summary>
+        /// Если реестр приложений падает, уведомление всё равно создано; повторный Push
+        /// не должен ни создавать дубликат, ни «забыть» ошибку молча в виде исключения.
+        /// </summary>
+        private static void HubBadgeFailureKeepsSingleNotification()
+        {
+            var apps = new ThrowingAppRegistry();
+            var notifications = new PhoneNotificationService();
+            var hub = new PhoneNotificationHub(notifications, apps);
+            var clock = new FakePhoneClock(0d);
+
+            PhoneResult first = hub.Push(
+                "job-1", "work", PhoneNotificationType.Job, "Заказ", "Текст",
+                "jobs", PhoneNotificationChannel.AppBadge, clock);
+            PhoneResult second = hub.Push(
+                "job-1", "work", PhoneNotificationType.Job, "Заказ", "Текст",
+                "jobs", PhoneNotificationChannel.AppBadge, clock);
+
+            MiniTestRunner.IsTrue(first.IsSuccess, "исключение реестра не отменяет уведомление");
+            MiniTestRunner.AreEqual(PhoneResultCode.DuplicateId, second.Code, "повтор отклонён");
+            MiniTestRunner.AreEqual(1, notifications.Notifications.Count, "уведомление одно");
+            MiniTestRunner.AreEqual(1, apps.AddUnreadCalls, "повторный Push не доходит до бейджа (дедупликация раньше)");
+        }
+
+        private static void SnapshotIsDefensiveCopy()
+        {
+            var notifications = new PhoneNotificationService();
+            var list = new List<PhoneNotificationSnapshot>
+            {
+                new PhoneNotificationSnapshot("n1", "bank", PhoneNotificationType.Bank, "Заголовок", "Т", GameMinutes.Unknown, false)
+            };
+
+            var snapshot = new PhoneNotificationsSnapshot(list);
+            list.Clear();
+
+            MiniTestRunner.AreEqual(1, snapshot.Notifications.Count, "снимок не зависит от списка вызывающего кода");
+        }
+
+        /// <summary>Реестр приложений, который падает на любом изменении счётчика.</summary>
+        private sealed class ThrowingAppRegistry : IPhoneAppRegistry
+        {
+            public int AddUnreadCalls { get; private set; }
+
+            public System.Collections.Generic.IReadOnlyList<PhoneApp> Apps =>
+                new System.Collections.Generic.List<PhoneApp>().AsReadOnly();
+
+            public int TotalUnread => 0;
+
+            public PhoneResult Register(PhoneApp app)
+            {
+                return PhoneResult.Ok(app == null ? null : app.Id);
+            }
+
+            public PhoneResult<PhoneApp> Get(string appId)
+            {
+                return PhoneResult<PhoneApp>.Fail(PhoneResultCode.NotFound);
+            }
+
+            public PhoneResult SetAvailability(string appId, bool isAvailable)
+            {
+                return PhoneResult.Fail(PhoneResultCode.NotFound, appId);
+            }
+
+            public PhoneResult AddUnread(string appId, int delta)
+            {
+                AddUnreadCalls++;
+                throw new InvalidOperationException("Тестовый сбой реестра приложений.");
+            }
+
+            public PhoneResult ClearUnread(string appId)
+            {
+                return PhoneResult.Fail(PhoneResultCode.NotFound, appId);
+            }
         }
 
         private static PhoneNotification NewNotification(string id, PhoneNotificationType type, bool isRead)

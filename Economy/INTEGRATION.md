@@ -29,7 +29,7 @@
 | `Economy/Shop/PurchaseResult.cs` | `Assets/Economy/Shop/PurchaseResult.cs` | Результат, `IShopService` |
 | `Economy/Shop/ShopService.cs` | `Assets/Economy/Shop/ShopService.cs` | Сервис покупки |
 | `Economy/Tests/Economy.Tests.asmdef` | `Assets/Economy/Tests/Economy.Tests.asmdef` | Тестовая сборка (Editor) |
-| `Economy/Tests/ShopServiceTests.cs` | `Assets/Economy/Tests/ShopServiceTests.cs` | 25 тестов |
+| `Economy/Tests/ShopServiceTests.cs` | `Assets/Economy/Tests/ShopServiceTests.cs` | 33 теста |
 | `Economy/Tests/MiniTestRunner.cs` | `Assets/Economy/Tests/MiniTestRunner.cs` | Раннер без пакетов |
 | `Economy/Tests/EconomyNUnitTests.cs` | `Assets/Economy/Tests/EconomyNUnitTests.cs` | NUnit-обёртка (опционально) |
 | `Economy/Tests/Fakes/FakeAdapters.cs` | `Assets/Economy/Tests/Fakes/FakeAdapters.cs` | Тестовые адаптеры |
@@ -58,7 +58,7 @@ readonly struct Money : IEquatable<Money>, IComparable<Money>
     bool TryAdd(Money other, out Money sum);           // false при переполнении
 }
 
-enum EconomyResultCode { Success, InsufficientFunds, ProductNotFound, InvalidQuantity, InventoryRejected, InternalError }
+enum EconomyResultCode { Success, InsufficientFunds, ProductNotFound, InvalidQuantity, InventoryRejected, InternalError, PendingRefund }
 
 interface IWalletAdapter
 {
@@ -124,6 +124,8 @@ interface IShopService
 {
     PurchaseResult Purchase(IWalletAdapter wallet, IInventoryAdapter inventory, PurchaseRequest request);
     IShopCatalog Catalog { get; }
+    int PendingRefundCount { get; }                       // незавершённые возвраты (ТЗ №015)
+    bool RetryPendingRefunds(IWalletAdapter wallet);      // повтор компенсаций
 }
 
 sealed class ShopService : IShopService { ShopService(IShopCatalog catalog); }
@@ -144,7 +146,9 @@ sealed class ShopService : IShopService { ShopService(IShopCatalog catalog); }
 6. `inventory.CanApprove(...)` → при `false` `InventoryRejected` **без списания денег**.
 7. `wallet.TrySpend(TotalCost)`; `false` → `InsufficientFunds`; исключение → `InternalError`.
 8. `inventory.TryAdd(...)`; при `false`/исключении → `wallet.TryRefund(TotalCost)`:
-   успешно → `InventoryRejected`, неуспешно → `InternalError`.
+   успешно → `InventoryRejected`, неуспешно → `InternalError` **и сумма уходит в журнал
+   незавершённых возвратов** (аудит ТЗ №015). Шаг 0 каждой следующей покупки — повтор
+   журнала; если он не закрылся, покупка возвращает `PendingRefund` и ничего не списывает.
 9. Успех → `Success`, `PurchasedQuantity = Quantity`, `UnitsGranted = UnitsPerPurchase × Quantity`.
 
 **Гарантия:** деньги списываются только после подтверждённой возможности принять товар,
@@ -260,7 +264,7 @@ dotnet run --project Console.csproj
 `Console.csproj` компилирует `Core`, `Shop` и тесты как консольное приложение
 и возвращает `0` при успехе, `1` при провале.
 
-Ожидаемый результат: **25 тестов**, все PASS (см. п.7 — фактически не проверялось).
+Ожидаемый результат: **33 теста**, все PASS (см. п.7 — фактически не проверялось).
 
 ---
 

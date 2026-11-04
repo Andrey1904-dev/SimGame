@@ -116,5 +116,17 @@ namespace LifeFromZero.Economy.Shop
 
         /// <summary>Доступный каталог (для витрины).</summary>
         IShopCatalog Catalog { get; }
+
+        /// <summary>
+        /// Сколько сумм ждёт возврата (0 — всё согласовано). Непустой журнал блокирует
+        /// новые покупки кодом <see cref="EconomyResultCode.PendingRefund"/>.
+        /// </summary>
+        int PendingRefundCount { get; }
+
+        /// <summary>
+        /// Повторяет незавершённые возвраты. <c>true</c> — журнал пуст (включая случай,
+        /// когда он был пуст изначально). Исключения кошелька превращаются в <c>false</c>.
+        /// </summary>
+        bool RetryPendingRefunds(IWalletAdapter wallet);
     }
 }

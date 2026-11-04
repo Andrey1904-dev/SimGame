@@ -51,7 +51,10 @@ namespace LifeFromZero.Phone.Notifications
 
         public PhoneNotificationsSnapshot(IReadOnlyList<PhoneNotificationSnapshot> notifications)
         {
-            Notifications = notifications ?? new List<PhoneNotificationSnapshot>().AsReadOnly();
+            // Защитная копия: снимок иммутабелен по отношению к списку вызывающего кода.
+            Notifications = notifications == null
+                ? (IReadOnlyList<PhoneNotificationSnapshot>)new List<PhoneNotificationSnapshot>().AsReadOnly()
+                : new List<PhoneNotificationSnapshot>(notifications).AsReadOnly();
         }
     }
 }

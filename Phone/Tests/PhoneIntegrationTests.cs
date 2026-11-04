@@ -30,6 +30,9 @@ namespace LifeFromZero.Phone.Tests
             suite.Add("Интеграция: игровое время — корректные и некорректные значения", GameMinutesValidation);
             suite.Add("Интеграция: фасад собирает все сервисы", FacadeWiring);
             suite.Add("Интеграция: фасад требует зависимости", FacadeRequiresDependencies);
+
+            // Регрессионные тесты аудита ТЗ №015.
+            suite.Add("Интеграция: пустые записи в ответах источников не доходят до UI", AdaptersReturnNullEntries);
         }
 
         private static void IdSpacesIndependent()
@@ -216,6 +219,35 @@ namespace LifeFromZero.Phone.Tests
 
             MiniTestRunner.AreEqual(1, facade.UnreadMessages, "счётчик сообщений");
             MiniTestRunner.AreEqual(1, facade.UnreadNotifications, "счётчик уведомлений");
+        }
+
+        /// <summary>
+        /// Источники (адаптеры пишет Codex) могут вернуть массив с null-элементами.
+        /// Телефон обязан отфильтровать их, а не отдавать null в UI.
+        /// </summary>
+        private static void AdaptersReturnNullEntries()
+        {
+            var jobs = new FakeJobsSource
+            {
+                Orders = new[]
+                {
+                    new DeliveryJobDto("order-1", "Хлеб", 150L, DeliveryJobPhase.Available),
+                    null
+                }
+            };
+
+            WorkSummary work = new WorkSummaryService(jobs).GetSummary().Value;
+            MiniTestRunner.AreEqual(1, work.Orders.Length, "null-заказ отфильтрован");
+            MiniTestRunner.AreEqual("order-1", work.Orders[0].OrderId, "реальный заказ сохранён");
+
+            var debts = new FakeDebtsSource
+            {
+                Debts = new[] { new DebtDto("rent", "Аренда", 5000L, 100d), null }
+            };
+
+            BankSummary bank = new BankSummaryService(new FakeBalanceSource { Rubles = 10L }, debts).GetSummary().Value;
+            MiniTestRunner.AreEqual(1, bank.Debts.Length, "null-долг отфильтрован");
+            MiniTestRunner.AreEqual("rent", bank.Debts[0].Id, "реальный долг сохранён");
         }
 
         private static void FacadeRequiresDependencies()
