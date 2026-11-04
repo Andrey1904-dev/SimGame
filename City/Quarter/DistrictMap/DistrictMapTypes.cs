@@ -11,14 +11,6 @@ using System.Collections.Generic;
 
 namespace LifeFromZero.City.Quarter
 {
-    /// <summary>Режим генерации города (CityBootstrap и тесты выбирают по нему генератор).</summary>
-    public enum CityLayoutMode
-    {
-        /// <summary>Квартал 250×250 м (ТЗ №023–028), по умолчанию.</summary>
-        Quarter250 = 0,
-        /// <summary>Карта игрового района 750×750 м (ТЗ №031).</summary>
-        District750 = 1
-    }
 
     /// <summary>Идентификаторы раскладки в QuarterPlan.LayoutId.</summary>
     public static class QuarterLayoutIds

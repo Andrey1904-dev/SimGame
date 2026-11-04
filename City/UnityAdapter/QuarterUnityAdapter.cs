@@ -163,8 +163,9 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
 
             if (obj.TypeId == QuarterObjectTypes.Tree && !isPrefab)
                 AddTreeCanopy(go);
-            if (obj.TypeId == QuarterObjectTypes.Building && !isPrefab)
-                BuildBuildingDetails(obj, root);
+            if ((obj.TypeId == QuarterObjectTypes.Building || obj.TypeId == DistrictObjectTypes.Commerce ||
+                 obj.TypeId == DistrictObjectTypes.IndustryBuilding) && !isPrefab)
+                BuildBuildingDetails(obj, root); // окна/панели/швы — те же меши, что у жилых домов; коллайдеров нет
             if (obj.TypeId != QuarterObjectTypes.BasementLamp)
                 go.isStatic = true; // статичная геометрия: Unity сможет батчить; материалы и меши примитивов общие
 
@@ -288,8 +289,9 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             // Навес без коллайдера.
             typeId == DistrictObjectTypes.Commerce || typeId == DistrictObjectTypes.IndustryBuilding ||
             typeId == DistrictObjectTypes.IndustryChimney ||
-            // Круговое кольцо и площадка погрузки намеренно БЕЗ коллайдера: проходимы (как в Python-зеркале),
-            // их примитивные коллайдеры снимаются в CreatePrimitive.
+            // Кольцо и площадка погрузки — ровная земля (плоский бокс): проходимы, коллайдер нужен,
+            // т.к. общей плоскости земли в адаптере нет (как у дорог и газонов).
+            typeId == DistrictObjectTypes.Roundabout || typeId == DistrictObjectTypes.IndustryLoading ||
             typeId == DistrictObjectTypes.GasIsland ||
             typeId == DistrictObjectTypes.GasPump || typeId == DistrictObjectTypes.GasKiosk ||
             typeId == DistrictObjectTypes.GasPost ||
@@ -680,6 +682,13 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             if (renderer != null) renderer.sharedMaterial = MaterialForObject(obj);
             // CreatePrimitive уже даёт коллайдер; примитивам дорог/разметки он не нужен.
             var existing = go.GetComponent<Collider>();
+            // Кольцо: цилиндр несёт CapsuleCollider; при масштабе 16×0.12×16 капсула становится столбом.
+            // Убираем его сразу и даём плоский BoxCollider (добавляется ниже, т.к. коллайдера уже нет).
+            if (existing != null && obj.TypeId == DistrictObjectTypes.Roundabout)
+            {
+                UnityEngine.Object.DestroyImmediate(existing);
+                existing = null;
+            }
             if (existing != null && !NeedsCollider(obj.TypeId))
                 Destroy(existing);
             return go;

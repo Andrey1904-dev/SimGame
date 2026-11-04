@@ -85,7 +85,7 @@ namespace LifeFromZero.City.Quarter
                 (492f, 58f, 505f, 58f), (492f, 74f, 505f, 74f),      // АЗС-1 -> V505
                 (115f, 672f, 150f, 672f), (115f, 688f, 150f, 688f),  // АЗС-2 -> V150
                 (718f, 522f, 730f, 522f), (718f, 538f, 730f, 538f),  // АЗС-3 -> V730
-                (115f, 332f, 150f, 332f), (115f, 348f, 150f, 348f),  // АЗС-4 -> V150
+                (115f, 387f, 150f, 387f), (115f, 403f, 150f, 403f),  // АЗС-4 -> V150 (южнее ломбарда, ТЗ №033)
                 (345f, 470f, 345f, 492f),                            // парковка ТЦ «Горизонт» с H470
                 (85f, 470f, 85f, 492f),                              // склад с H470
                 (470f, 600f, 470f, 669f),                            // грузовой подъезд к заводу с H600
@@ -439,8 +439,6 @@ namespace LifeFromZero.City.Quarter
                         ("interactionRadius", Num(DeliveryPointInfo.DefaultInteractionRadius)));
                 }
 
-                float sx = rot == 0f ? length : depth;
-                float sz = rot == 0f ? depth : length;
                 var parameters = Params(
                     ("buildingId", bid), ("archetype", arch.Id),
                     ("floors", Inv(arch.Floors)), ("entrances", Inv(n)),
@@ -559,16 +557,37 @@ namespace LifeFromZero.City.Quarter
                 }
 
                 Rect2 footprint = RectC(cx, cz, length, depth);
+                // Фасадные детали (окна, панели) — через BuildBuildingDetails; без балконов и интерьера.
+                int floorsCount = Math.Max(1, (int)Math.Floor(height / 3.2f));
+                int windowsPerFloor = 2 * Math.Max(1, (int)Math.Round(length / 6f)); // чётное число: по центру фасада дверь
                 Put(DistrictObjectTypes.Commerce, cx, 0f, cz, 0f, length, height, depth,
-                    ("id", cid), ("type", ctype), ("name", name), ("facadeColor", color));
+                    ("id", cid), ("type", ctype), ("name", name), ("facadeColor", color),
+                    ("style", ctype == "warehouse" ? "panel" : "brick"),
+                    ("floors", Inv(floorsCount)), ("windowsPerFloor", Inv(windowsPerFloor)),
+                    ("windowStyle", FacadeWindowStyle(cid)), ("roofVariant", "flat"), ("balconyType", "none"),
+                    ("balconyOffset", "0"), ("wear", "0.2"), ("acUnits", ""), ("patchWindows", ""));
                 float signWidth = normal.X == 0f ? Math.Min(length * 0.6f, 8f) : Math.Min(depth * 0.6f, 8f);
-                Put(DistrictObjectTypes.Sign, cx + normal.X * (half + 0.15f), 2.2f, cz + normal.Z * (half + 0.15f),
+                // Вывеска выше двери (дверь до 2.3 м): центр 2.75, низ 2.35, верх 3.15 (все фасады ≥ 3.4 м).
+                Put(DistrictObjectTypes.Sign, cx + normal.X * (half + 0.15f), 2.75f, cz + normal.Z * (half + 0.15f),
                     rot, signWidth, 0.8f, 0.18f, ("text", name));
 
                 var point = new DistrictPointInfo(cid, ctype, name, new Vec2(cx, cz), footprint,
                     entrances, firstInteraction);
                 _points.Add(point);
                 return point;
+            }
+
+            /// <summary>Окна коммерции: разные типы у магазина, банка, больницы и бизнес-центра.</summary>
+            private static string FacadeWindowStyle(string cid)
+            {
+                switch (cid)
+                {
+                    case "shop-01":
+                    case "com-bank": return "wide";
+                    case "com-hospital":
+                    case "com-business": return "tall";
+                    default: return "standard";
+                }
             }
 
             /// <summary>Парковка, навес, острова и колонки, киоск. Въезд и выезд — проезды к улице.</summary>
@@ -690,7 +709,7 @@ namespace LifeFromZero.City.Quarter
                 Vec3 shopEntrance = shop.Entrances[0];
                 _shop = new GroceryShopInfo("shop-01", new Vec2(210f, 250f), new Vec3(44f, 3.4f, 26f),
                     shopEntrance, shop.InteractionPoint.Value,
-                    new Rect2(shopEntrance.X - 2f, 244f, shopEntrance.X, 256f),
+                    new Rect2(shopEntrance.X - 2f, shop.Center.Z - 6f, shopEntrance.X, shop.Center.Z + 6f),
                     shop.Footprint);
                 AddCommerce("com-cafe", "cafe", "КАФЕ", 190f, 425f, 26f, 16f, 4f, West, "#D8A878", 1);
                 AddCommerce("com-restaurant", "restaurant", "РЕСТОРАН", 190f, 390f, 26f, 16f, 4.6f, West, "#8E3B3B", 1);
@@ -710,7 +729,7 @@ namespace LifeFromZero.City.Quarter
             {
                 // ПВЗ — единственный пункт выдачи (та же форма, что PickupPointInfo в квартале), фасад на юг.
                 const string pvzId = "pvz-01";
-                const float frontZ = 386f, centerZ = 390f;
+                const float frontZ = 312f, centerZ = 316f; // ТЗ №033: ПВЗ перенесён в Западный район, к H300
                 const float cx = 85f;
                 Rect2 footprint = new Rect2(cx - 6f, frontZ, cx + 6f, frontZ + 8f);
                 Rect2 plaza = new Rect2(cx - 7f, frontZ - 4f, cx + 7f, frontZ);
@@ -745,7 +764,7 @@ namespace LifeFromZero.City.Quarter
 
             private void BuildGasStations()
             {
-                AddGasStation("gas-04", 85f, 340f);   // АЗС-4: непосредственно под ломбардом
+                AddGasStation("gas-04", 85f, 395f);   // АЗС-4: непосредственно к югу от ломбарда (85, 425)
                 AddGasStation("gas-02", 85f, 680f);   // АЗС-2: северо-запад
                 AddGasStation("gas-01", 462f, 66f);   // АЗС-1: юг
                 AddGasStation("gas-03", 688f, 530f);  // АЗС-3: восток
@@ -763,7 +782,10 @@ namespace LifeFromZero.City.Quarter
             {
                 // Промзона (северо-восток): завод, корпус производства/склада, погрузка, грузовые подъезды.
                 Put(DistrictObjectTypes.IndustryBuilding, 500f, 0f, 690f, 0f, 100f, 12f, 40f,
-                    ("facadeColor", "#6B6F73"), ("name", "ЗАВОД"));
+                    ("facadeColor", "#6B6F73"), ("name", "ЗАВОД"), ("style", "panel"), ("floors", "3"),
+                    ("windowsPerFloor", "34"), ("windowStyle", "wide"), ("roofVariant", "flat"),
+                    ("balconyType", "none"), ("balconyOffset", "0"), ("wear", "0.3"), ("acUnits", ""), ("patchWindows", ""));
+                Put(DistrictObjectTypes.Door, 470f, 0f, 670f, 0f, 6f, 4.5f, 0.3f, ("kind", "gate")); // ворота завода, не solid
                 Put(DistrictObjectTypes.IndustryChimney, 532f, 0f, 712f, 0f, 2.4f, 30f, 2.4f);
                 Put(DistrictObjectTypes.IndustryChimney, 538f, 0f, 712f, 0f, 2.4f, 30f, 2.4f);
                 _points.Add(new DistrictPointInfo("ind-factory", "factory", "ЗАВОД", new Vec2(500f, 690f),
@@ -776,8 +798,12 @@ namespace LifeFromZero.City.Quarter
                     ("interactionRadius", Num(DeliveryPointInfo.DefaultInteractionRadius)));
 
                 Put(DistrictObjectTypes.IndustryBuilding, 640f, 0f, 690f, 0f, 80f, 8f, 30f,
-                    ("facadeColor", "#7D8B6A"), ("name", "ПРОИЗВОДСТВО"));
-                Put(DistrictObjectTypes.IndustryLoading, 640f, 0f, 662f, 0f, 70f, 0.9f, 8f);
+                    ("facadeColor", "#7D8B6A"), ("name", "ПРОИЗВОДСТВО"), ("style", "panel"), ("floors", "2"),
+                    ("windowsPerFloor", "26"), ("windowStyle", "wide"), ("roofVariant", "flat"),
+                    ("balconyType", "none"), ("balconyOffset", "0"), ("wear", "0.3"), ("acUnits", ""), ("patchWindows", ""));
+                Put(DistrictObjectTypes.Door, 640f, 0f, 675f, 0f, 6f, 4.5f, 0.3f, ("kind", "gate")); // ворота производства, не solid
+                // Площадка погрузки: ровная земля высотой 0.06 м (раньше 0.9 м — перекрывала точку доставки).
+                Put(DistrictObjectTypes.IndustryLoading, 640f, 0f, 662f, 0f, 70f, 0.06f, 8f);
                 _points.Add(new DistrictPointInfo("ind-warehouse", "industry.warehouse", "ПРОИЗВОДСТВО/СКЛАД",
                     new Vec2(640f, 690f), RectC(640f, 690f, 80f, 30f),
                     new[] { new Vec3(640f, 0f, 674f) }, new Vec3(652f, 0f, 662f)));

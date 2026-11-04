@@ -33,7 +33,7 @@ DRIVEWAYS = [
     (492, 58, 505, 58), (492, 74, 505, 74),      # АЗС-1 -> V505
     (115, 672, 150, 672), (115, 688, 150, 688),  # АЗС-2 -> V150
     (718, 522, 730, 522), (718, 538, 730, 538),  # АЗС-3 -> V730
-    (115, 332, 150, 332), (115, 348, 150, 348),  # АЗС-4 -> V150
+    (115, 387, 150, 387), (115, 403, 150, 403),  # АЗС-4 -> V150 (под ломбардом, ТЗ №033)
     (345, 470, 345, 492),                        # въезд на парковку ТЦ с H470
     (85, 470, 85, 492),                          # въезд на территорию склада с H470
     (470, 600, 470, 669),                        # грузовой подъезд к заводу с H600
@@ -147,6 +147,7 @@ def gas_station(gid, cx, cz, street_x):
     for dx in (-12, 12):
         for dz in (-6, 6):
             obj('gas.post', cx + dx, 0, cz + dz, 0, 0.3, 4.5, 0.3)
+            solid(gid + '.post', rect_c(cx + dx, cz + dz, 0.3, 0.3))
     for ix in (cx - 6, cx + 6):
         obj('gas.island', ix, 0, cz, 0, 1.6, 0.2, 9)
         solid(gid + '.island', rect_c(ix, cz, 1.6, 9))
@@ -307,7 +308,8 @@ def emit_streets(nodes, roads):
     # Ровное кольцо-круговой перекрёсток на пересечении V270 × H300.
     rx, rz = ROUNDABOUT
     obj('district.roundabout', rx, 0, rz, 0, 16.0, 0.12, 16.0)
-    obj('lawn', rx, 0, rz, 0, 7.0, 0.2, 7.0)  # остров кольца: декор внутри дорожного круга
+    decor.append(('roundabout.disc', rect_c(rx, rz, 16.0, 16.0)))  # проходимый диск (не solid)
+    lawn('roundabout.island', rect_c(rx, rz, 7.0, 7.0))           # центральный газон кольца (ground)
 
 
 def build_district():
@@ -379,20 +381,19 @@ def build_district():
     lot('warehouse-yard-w', (52, 480, 82, 510), 0)
     lot('warehouse-yard-e', (88, 480, 118, 510), 0)
     # ПВЗ (зеркало PickupPointInfo): фасад на юг
-    pvz_center = (85.0, 390.0)
-    commerce_pvz_front = 386.0
-    solid('pvz-01', rect_c(85, 390, 12, 8))
-    obj('pickup.building', 85, 0, 390, 0, 12, 3.2, 8,
+    pvz_center = (85.0, 316.0)
+    solid('pvz-01', rect_c(85, 316, 12, 8))
+    obj('pickup.building', 85, 0, 316, 0, 12, 3.2, 8,
         buildingId='pvz-01', signText='ПУНКТ ВЫДАЧИ ЗАКАЗОВ')
-    obj('pickup.plaza', 85, 0, 384, 0, 14, 0.07, 4)
-    zone('pvz-01.plaza', rect_c(85, 384, 14, 4))
-    obj('pickup.point', 85, 0, 384.4, 0, 0.8, 0.05, 0.8, purpose='delivery.pickup')
+    obj('pickup.plaza', 85, 0, 310, 0, 14, 0.07, 4)
+    zone('pvz-01.plaza', rect_c(85, 310, 14, 4))
+    obj('pickup.point', 85, 0, 310.4, 0, 0.8, 0.05, 0.8, purpose='delivery.pickup')
     points.append(dict(id='pvz-01', type='pickup', name='ПУНКТ ВЫДАЧИ ЗАКАЗОВ', center=pvz_center,
-                       rect=rect_c(85, 390, 12, 8), entrances=[(85, 385.7)], interaction=(85, 384.4)))
-    deliveries.append(('drop-pvz-01', 'pvz-01', (85, 384.4), 'pickup'))
-    entrance_pts.append(('pvz-01', (85, 384.4)))
+                       rect=rect_c(85, 316, 12, 8), entrances=[(85, 311.7)], interaction=(85, 310.4)))
+    deliveries.append(('drop-pvz-01', 'pvz-01', (85, 310.4), 'pickup'))
+    entrance_pts.append(('pvz-01', (85, 310.4)))
     # ---------- Западный блок: АЗС-4 под ломбардом ----------
-    gas_station('gas-04', 85, 340, 150)
+    gas_station('gas-04', 85, 395, 150)
     gas_station('gas-02', 85, 680, 150)
     gas_station('gas-01', 462, 66, 505)
     gas_station('gas-03', 688, 530, 730)
@@ -405,13 +406,17 @@ def build_district():
     obj('industry.building', 500, 0, 690, 0, 100, 12.0, 40, facadeColor='#6B6F73', name='ЗАВОД')
     obj('industry.chimney', 532, 0, 712, 0, 2.4, 30.0, 2.4)
     obj('industry.chimney', 538, 0, 712, 0, 2.4, 30.0, 2.4)
+    solid('chimney-1', rect_c(532, 712, 2.4, 2.4))
+    solid('chimney-2', rect_c(538, 712, 2.4, 2.4))
+    obj('district.door', 470, 0, 670, 0, 6.0, 4.5, 0.3, kind='gate')   # ворота завода (не solid)
     points.append(dict(id='ind-factory', type='factory', name='ЗАВОД', center=(500, 690),
                        rect=rect_c(500, 690, 100, 40), entrances=[(470, 669)], interaction=(478, 666)))
     deliveries.append(('drop-ind-factory-gate', 'ind-factory', (478, 666), 'logistics'))
     entrance_pts.append(('ind-factory', (478, 666)))
     solid('warehouse-prod', rect_c(640, 690, 80, 30))
     obj('industry.building', 640, 0, 690, 0, 80, 8.0, 30, facadeColor='#7D8B6A', name='ПРОИЗВОДСТВО')
-    obj('industry.loading', 640, 0, 662, 0, 70, 0.9, 8)
+    lawn('industry.loading', rect_c(640, 662, 70, 8))  # площадка погрузки: ground, высота 0.06 (C# — flat box)
+    obj('district.door', 640, 0, 675, 0, 6.0, 4.5, 0.3, kind='gate')   # ворота производства (не solid)
     points.append(dict(id='ind-warehouse', type='industry.warehouse', name='ПРОИЗВОДСТВО/СКЛАД',
                        center=(640, 690), rect=rect_c(640, 690, 80, 30), entrances=[(640, 674)],
                        interaction=(652, 662)))
@@ -451,6 +456,8 @@ def check_all():
     corridors = street_corridors()
     drv = road_rects(roads)
     for name, r in solids + zones + decor:
+        if name.startswith('roundabout'):
+            continue  # кольцо занимает сам перекрёсток V270×H300 — единственное допустимое пересечение с улицей
         for c in corridors:
             if overlap(r, c):
                 errors.append('solid/zone %s overlaps street corridor %s' % (name, c))
@@ -507,6 +514,19 @@ def check_all():
             if w in low:
                 errors.append('forbidden object name/type: %s (match %r)' % (nm, w))
                 break
+
+    # 3c. АЗС-4 непосредственно к югу от ломбарда (ТЗ №033): зазор 0..8 м, перекрытие по X
+    pawn = [r for n, r in solids if n == 'com-pawnshop']
+    pad4 = [r for n, r in zones if n == 'gas-04.pad']
+    if not pawn or not pad4:
+        errors.append('gas-04 pad or com-pawnshop missing')
+    else:
+        pw, pd = pawn[0], pad4[0]
+        gap = pw[1] - pd[3]
+        if not (0.0 <= gap <= 8.0):
+            errors.append('gas-04 pad is not directly south of pawnshop: gap %.1f m' % gap)
+        if not (pd[0] < pw[2] and pw[0] < pd[2]):
+            errors.append('gas-04 pad x-range does not overlap pawnshop')
 
     # 4. Счётчики
     mkd = [b for b in buildings if not b['private']]
