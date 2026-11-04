@@ -1,8 +1,25 @@
-# Модуль экономики — ТЗ №014-В.1
+# Модуль экономики — ТЗ №014-В.1, финансовые контракты — ТЗ №021
 
 Независимый C#-модуль «ядро экономики и продуктовый магазин» для Life From Zero.
 Не содержит Unity UI, MonoBehaviour, сцен, собственного кошелька или инвентаря.
 Подключается к `MoneyWallet` / `FoodInventory` через адаптеры, которые пишет Codex.
+
+## Финансовые гарантии (ТЗ №021)
+
+* Каждая покупка с `purchaseId` — запись журнала с явным состоянием
+  (`Reserved → Debited → Granted`, либо `→ RefundPending → Refunded/RefundFailed`, либо `Declined`).
+* Списание — `shop:<purchaseId>`, возврат — `shop-refund:<purchaseId>`. Повтор с тем же ID
+  не двигает деньги и не выдаёт товар (при идемпотентных адаптерах — на уровне кошелька/инвентаря).
+* Исключение или «лживый» `false` адаптера больше не означают «денег нет»: исход сверяется
+  с журналом адаптера, иначе возвращается `OutcomeUnknown` и покупки блокируются.
+* Незавершённая операция блокирует новые покупки (`PendingOperation` / `PendingRefund`)
+  до `RetryPendingOperations` или `TryResolveUnknown`.
+* `CreateSnapshot` / `RestoreSnapshot` сохраняют незавершённые операции вместе с ID.
+* Исключение обработчика `Changed` не влияет на финансовый результат.
+
+Ограничение: гарантии при аварийном завершении требуют durable-журналов в реальных
+`MoneyWallet`/`FoodInventory` и согласованной фиксации сохранения — см.
+`ECONOMY_INTEGRATION_QUICKSTART.md` (Режимы A и B).
 
 ## Структура
 
@@ -11,7 +28,11 @@ Economy/
 ├── Economy.asmdef                 сборка модуля (noEngineReferences)
 ├── Core/
 │   ├── Money.cs                   сумма в целых рублях + проверка переполнения
-│   ├── EconomyResultCode.cs       коды исходов операций
+│   ├── EconomyResultCode.cs       коды исходов операций (+ PendingOperation, OutcomeUnknown)
+│   ├── FinancialOperationId.cs    пространство ID: shop:<id> / shop-refund:<id>
+│   ├── WalletOperationState.cs    наблюдаемое состояние операции в журнале кошелька
+│   ├── IdempotentWalletAdapter.cs IIdempotentWalletAdapter + LegacyWalletAdapter (Режим A)
+│   ├── IdempotentInventoryAdapter.cs IIdempotentInventoryAdapter (защита от двойной выдачи)
 │   ├── IWalletAdapter.cs          абстракция кошелька (MoneyWallet)
 │   ├── IInventoryAdapter.cs       абстракция инвентаря (FoodInventory)
 │   └── SafeCall.cs                безопасный вызов адаптеров

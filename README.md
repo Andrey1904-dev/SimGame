@@ -4,16 +4,19 @@
 
 | Модуль | Сборка | Тесты | Документ |
 |---|---|---|---|
-| `Economy/` — деньги, магазин, покупки | `LifeFromZero.Economy` | 34 | `Economy/INTEGRATION.md` |
-| `Jobs/Delivery/` — курьерские заказы | `LifeFromZero.Jobs.Delivery` | 45 | `Jobs/INTEGRATION.md` |
+| `Economy/` — деньги, магазин, покупки | `LifeFromZero.Economy` | 60 | `Economy/INTEGRATION.md`, `ECONOMY_INTEGRATION_QUICKSTART.md` |
+| `Jobs/Delivery/` — курьерские заказы | `LifeFromZero.Jobs.Delivery` | 55 | `Jobs/INTEGRATION.md` |
 | `Phone/` — смартфон, сообщения, контакты, уведомления | `LifeFromZero.Phone` | 93 | `Phone/INTEGRATION.md` |
-| `Debts/` — долги, платежи, штрафы, стадии взыскания | `LifeFromZero.Debts` | 87 | `Debts/INTEGRATION.md` |
+| `Debts/` — долги, платежи, штрафы, стадии взыскания | `LifeFromZero.Debts` | 96 | `Debts/INTEGRATION.md` |
 
 Полный аудит четырёх модулей (ТЗ №017), найденные дефекты, план подключения
 к Unity и инструкция для Codex: **`FULL_AUDIT_REPORT.md`**,
 **`UNITY_INTEGRATION_PLAN.md`**, **`AUDIT_PROGRESS.md`**.
 Предыдущий аудит трёх модулей (ТЗ №015): `INTEGRATION_AUDIT.md`.
 
-Статус проверки: синтаксис и контракты проверены статически (в среде нет
-C#-компилятора); **сборка и прогон 259 тестов не выполнялись** — см.
-`FULL_AUDIT_REPORT.md` §2 и §10.
+Статус проверки. ТЗ №021: финансовые контракты Economy/Delivery/Debts доведены, добавлены
+идентификаторы операций, идемпотентность, журнал состояний и снимки. Тесты этих трёх модулей
+**реально прогнаны вне Unity** (Roslyn / .NET WASM): Economy 60/60, Delivery 55/55, Debts 96/96 —
+все PASS. Компиляция и EditMode-прогон **внутри Unity не выполнялись** (Unity-проект недоступен);
+Phone-тесты в этом прогоне не запускались. См. `ECONOMY_INTEGRATION_QUICKSTART.md`,
+`FINANCIAL_OPERATION_IDS.md`, `TZ021_FINANCIAL_CONTRACTS_REPORT.md`.

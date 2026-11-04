@@ -19,6 +19,11 @@ namespace LifeFromZero.Jobs.Tests
                 if (Entries.TryGetValue(id, out previous)) return previous == rubles;
                 Entries.Add(id, rubles); Total += rubles; return true;
             }
+            public bool WasCredited(string id, out bool credited)
+            {
+                credited = Entries.ContainsKey(id);
+                return true;
+            }
         }
         [Test] public void RestoreBeforeCreditAndRetryDoesNotCreditTwice()
         {

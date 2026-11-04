@@ -31,7 +31,7 @@ namespace LifeFromZero.Debts.Tests
             suite.Add("Восстановление: RefundPending возвращает деньги, долг не меняется", RestoreRefundPending);
             suite.Add("Восстановление: отказ возврата повторяется до успеха", RefundRetried);
             suite.Add("Восстановление: повторное восстановление не зачитывает дважды", RecoveryIdempotent);
-            suite.Add("Защита: повтор paymentId после загрузки отклонён", DuplicateAfterRestore);
+            suite.Add("Защита: повтор paymentId после загрузки не списывает снова", DuplicateAfterRestore);
             suite.Add("Защита: серия платежей со сбоями сохраняет итоговую сумму", SeriesWithFailuresConsistent);
             suite.Add("Защита: компенсация не создаёт деньги из воздуха", RefundOnlyForRealDebit);
 
@@ -412,9 +412,12 @@ namespace LifeFromZero.Debts.Tests
             var restored = new DebtService(clock, wallet, null);
             DebtTestEnv.ExpectSuccess(restored.RestoreSnapshot(snapshot), "восстановление");
 
-            DebtTestEnv.ExpectCode(DebtResultCode.DuplicatePayment,
-                restored.TryPay(DebtTestEnv.DebtId, 1000L, "p1"), "повтор paymentId после загрузки");
+            // ТЗ №021: повтор после загрузки — идемпотентный успех без движения денег.
+            DebtPaymentResult replay = restored.TryPay(DebtTestEnv.DebtId, 1000L, "p1");
+            DebtTestEnv.ExpectCode(DebtResultCode.Success, replay, "повтор paymentId после загрузки");
+            MiniTestRunner.AreEqual(1000L, replay.PaidRubles, "прежняя сумма платежа");
             MiniTestRunner.AreEqual(4000L, wallet.Balance, "повторного списания нет");
+            MiniTestRunner.AreEqual(1, wallet.DebitCalls, "вызов списания остался один");
         }
 
         private static void SeriesWithFailuresConsistent()

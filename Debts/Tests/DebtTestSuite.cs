@@ -2,7 +2,8 @@
 // Namespace: LifeFromZero.Debts.Tests
 //
 // Единый набор тестов модуля: создание/платежи, время/штрафы/стадии,
-// финансовая безопасность и восстановление, сохранение/загрузка.
+// финансовая безопасность и восстановление, сохранение/загрузка,
+// финансовые контракты ТЗ №021 (идентификаторы, идемпотентность, компенсация).
 
 namespace LifeFromZero.Debts.Tests
 {
@@ -15,6 +16,7 @@ namespace LifeFromZero.Debts.Tests
             suite.AddRange(DebtPenaltyTests.CreateSuite());
             suite.AddRange(DebtPaymentSafetyTests.CreateSuite());
             suite.AddRange(DebtPersistenceTests.CreateSuite());
+            suite.AddRange(DebtFinancialContractTests.CreateSuite());
             return suite;
         }
     }

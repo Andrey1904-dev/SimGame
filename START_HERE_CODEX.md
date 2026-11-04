@@ -1,22 +1,47 @@
 # START HERE — SimGame → LIFE FROM ZERO
 
-Комплект для подготовки импорта; Unity-проект не был доступен, компиляция и тесты не запускались. Не считать комплект готовым к финансовому production-подключению.
+Комплект для подготовки импорта. **ТЗ №021:** финансовые контракты Economy, Delivery и Debts
+доведены, тесты **реально прогнаны** (Economy 60, Delivery 55, Debts 96 — все PASS).
+Unity-проект по-прежнему не был доступен: сборка внутри Unity и EditMode-прогон — задача Codex.
+Режим A (сессия без сохранений) готов к подключению. Режим B (сохранения) НЕ готов: см. §«Режим B».
 
 Источник: ветка `arena/896f0f35-simgame`. База текущей ветки `3e88e08d05232bfe9c9e918369db7366b807520c`; её дерево идентично подтверждённому `66e56ff7b9f19b2087283cffcd5a4eb37705909a`. Точный SHA комплекта получить `git rev-parse HEAD` в checkout этой опубликованной ветки.
 
-* Economy: `Economy/Core/`, `Economy/Shop/` — магазин, кошелёк и инвентарь через интерфейсы.
+* Economy: `Economy/Core/`, `Economy/Shop/` — магазин, кошелёк и инвентарь через интерфейсы;
+  журнал операций с идентификаторами (`ShopOperation`, `ShopSnapshot`), идемпотентные контракты
+  (`IIdempotentWalletAdapter`, `IIdempotentInventoryAdapter`), событие `Changed`.
 * Delivery: `Jobs/Delivery/` — заказы, игровые часы, выплата, снимок.
 * Phone: `Phone/` — приложения, контакты, сообщения, уведомления, снимки.
 * Debts: `Debts/` — долги, штрафы, платежи и снимок.
-* `UnityIntegrationKit/PhoneSources.cs` — готовые read-only адаптеры Delivery/Debts → Phone; Unity-мосты не реализованы.
+* `UnityIntegrationKit/PhoneSources.cs` — готовые read-only адаптеры Delivery/Debts → Phone.
+* `UnityIntegrationKit/AdapterBridges.cs` — независимые от Unity мосты: MoneyWallet, FoodInventory,
+  выплаты Delivery, платежи Debts, покупки/возвраты Economy. **Компилируются вместе с четырьмя
+  модулями (проверено).** Требуют от Codex только проброс минимальных методов (блоки `// CODEX:`).
 
-Порядок: импорт по `UNITY_IMPORT_MANIFEST.md`, компиляция, EditMode-тесты, Economy, Delivery, Phone, Debts, совместные проверки, затем согласование общего сохранения. Подробности по текущему этапу в `CODEX_EXECUTION_STEPS.md`; восемь коротких промптов — `CODEX_COPY_PASTE_TASKS.md`. Не читать всё заранее.
+Порядок: импорт по `UNITY_IMPORT_MANIFEST.md`, компиляция, EditMode-тесты, затем
+**Economy по `ECONOMY_INTEGRATION_QUICKSTART.md`** (Режим A), Delivery, Phone, Debts,
+совместные проверки, и только потом согласование общего сохранения.
+Подробности по этапам — `CODEX_EXECUTION_STEPS.md`; короткие промпты — `CODEX_COPY_PASTE_TASKS.md`.
+Не читать всё заранее.
 
-## Критические риски
+## Два режима — читать до подключения экономики
+
+**Режим A: Play Mode без сохранений.** Покупки и возвраты работают в текущей сессии.
+Повтор операции с тем же `purchaseId` внутри сессии не списывает деньги и не выдаёт товар
+повторно; `Changed`, недостаток средств и сбой инвентаря обработаны. **Гарантий при аварийном
+завершении игры нет** — так и говорите, не обещайте больше.
+
+**Режим B: сохранения.** Требует трёх вещей одновременно: durable-журнал в MoneyWallet,
+durable-журнал выдачи в FoodInventory и **единая запись сохранения** для кошелька, инвентаря и
+`ShopService.CreateSnapshot()`. Пока это не реализовано и не проверено — Режим B не объявлять
+готовым.
+
+## Критические риски (после ТЗ №021)
 * `NEEDS_UNITY_INSPECTION`: неизвестны API MoneyWallet, FoodInventory, GameClock, HUD, взаимодействий и текущего Save System. Не выдумывать сигнатуры и не заменять системы.
-* Delivery: ID выплаты добавлен, но защита при перезапуске зависит от атомарного устойчивого журнала реального кошелька. Legacy `IPayoutAdapter` не обеспечивает её. Просрочка при восстановлении, старые выплаты и уникальность ID требуют reconciliation.
-* Economy: покупка/компенсация без ID, нет гарантии crash-safe повтора. Остановить финансовую интеграцию до решения транзакций кошелька и инвентаря.
-* Debts требует durable идемпотентный wallet journal и согласованный pending. Снимки Phone messages/notifications могут требовать конвертер сериализации. Четыре модуля должны восстанавливаться согласованно.
+* Economy: контракты и журнал готовы; остаётся реализовать два адаптера (блоки `// CODEX:` в `UnityIntegrationKit/AdapterBridges.cs`) и проверить атомарность в реальном MoneyWallet.
+* Delivery: `PayoutOperation` даёт уникальные идентификаторы выплат; повтор не платит дважды даже после загрузки снимка. Защита при перезапуске всё ещё требует durable-журнала реального кошелька.
+* Debts: повтор `paymentId` теперь идемпотентен (полный прежний результат), компенсация помечает платёж. Нужен durable `IDebtWalletAdapter` в реальном кошельке.
+* Снимки Phone messages/notifications могут требовать конвертер сериализации. Четыре модуля должны восстанавливаться согласованно.
 
 По необходимости: `CODEX_ARCHITECTURE_MAP.md`, `CODEX_WIRING_MAP.md`, `SAVE_SYSTEM_INTEGRATION_PLAN.md`, `UNITY_TEST_EXECUTION.md`, `CLEANUP_REPORT.md`; исторические аудиты оставлены.
 

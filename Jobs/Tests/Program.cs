@@ -16,7 +16,7 @@ namespace LifeFromZero.Jobs.Tests
             Console.WriteLine("Life From Zero — Delivery jobs tests (ТЗ №014-Г.1)");
             Console.WriteLine();
 
-            TestSuite suite = DeliveryServiceTests.CreateSuite();
+            TestSuite suite = DeliveryTestSuite.CreateAll();
             int failed = MiniTestRunner.RunAndReport(suite);
 
             return failed == 0 ? 0 : 1;

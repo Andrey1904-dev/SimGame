@@ -19,7 +19,7 @@ namespace LifeFromZero.Economy.Tests
         [Test]
         public void RunAllEconomyTests()
         {
-            TestSuite suite = ShopServiceTests.CreateSuite();
+            TestSuite suite = EconomyTestSuite.CreateAll();
             var failures = new System.Collections.Generic.List<string>();
 
             foreach (TestRunResult result in suite.RunAll())

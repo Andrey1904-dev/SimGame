@@ -53,6 +53,18 @@ namespace LifeFromZero.Jobs.Tests
             return this;
         }
 
+        /// <summary>Добавляет все кейсы другого набора (для объединения файлов тестов).</summary>
+        public TestSuite AddRange(TestSuite other)
+        {
+            if (other == null)
+            {
+                throw new ArgumentNullException(nameof(other));
+            }
+
+            _cases.AddRange(other.Cases);
+            return this;
+        }
+
         public IReadOnlyList<TestRunResult> RunAll()
         {
             var results = new List<TestRunResult>(_cases.Count);

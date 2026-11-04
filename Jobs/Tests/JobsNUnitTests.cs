@@ -16,7 +16,7 @@ namespace LifeFromZero.Jobs.Tests
         [Test]
         public void RunAllDeliveryTests()
         {
-            TestSuite suite = DeliveryServiceTests.CreateSuite();
+            TestSuite suite = DeliveryTestSuite.CreateAll();
             var failures = new List<string>();
 
             foreach (TestRunResult result in suite.RunAll())
