@@ -284,11 +284,13 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             // коллайдеров персонаж проваливался бы сквозь покрытие (аудит №026).
             typeId == QuarterObjectTypes.Road || typeId == QuarterObjectTypes.Driveway ||
             typeId == QuarterObjectTypes.Intersection || typeId == QuarterObjectTypes.Sidewalk ||
-            // Районная карта: коммерция, завод и погрузка — твёрдые корпуса/площадки;
-            // острова, колонки, киоск и стойки АЗС тоже непроходимы. Навес без коллайдера.
+            // Районная карта: коммерция, завод и труба — твёрдые; острова, колонки, киоск и стойки АЗС тоже непроходимы.
+            // Навес без коллайдера.
             typeId == DistrictObjectTypes.Commerce || typeId == DistrictObjectTypes.IndustryBuilding ||
-            typeId == DistrictObjectTypes.IndustryChimney || typeId == DistrictObjectTypes.IndustryLoading ||
-            typeId == DistrictObjectTypes.Roundabout || typeId == DistrictObjectTypes.GasIsland ||
+            typeId == DistrictObjectTypes.IndustryChimney ||
+            // Круговое кольцо и площадка погрузки намеренно БЕЗ коллайдера: проходимы (как в Python-зеркале),
+            // их примитивные коллайдеры снимаются в CreatePrimitive.
+            typeId == DistrictObjectTypes.GasIsland ||
             typeId == DistrictObjectTypes.GasPump || typeId == DistrictObjectTypes.GasKiosk ||
             typeId == DistrictObjectTypes.GasPost ||
             // Открытая земля квартала: газоны, дорожки, парковки и площадки —

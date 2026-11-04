@@ -735,6 +735,8 @@ namespace LifeFromZero.City.Quarter
 
                 _pickup = new PickupPointInfo(pvzId, new Vec2(cx, centerZ), 0f, new Vec3(12f, 3.2f, 8f),
                     entrance, interaction, plaza, footprint);
+                _points.Add(new DistrictPointInfo(pvzId, "pickup", PickupPointInfo.SignText, new Vec2(cx, centerZ), footprint,
+                    new[] { entrance }, interaction));
                 _deliveries.Add(new DeliveryPointInfo("drop-" + pvzId, pvzId, 1, new Vec3(interaction.X, 0f, interaction.Z), "pickup"));
                 Put(QuarterObjectTypes.DeliveryDropoff, interaction.X, 0f, interaction.Z, 0f, 0.7f, 0.05f, 0.7f,
                     ("pointId", "drop-" + pvzId), ("buildingId", pvzId), ("entranceNumber", "1"),

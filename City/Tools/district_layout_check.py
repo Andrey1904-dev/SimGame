@@ -463,14 +463,50 @@ def check_all():
     for i in range(len(items)):
         for j in range(i + 1, len(items)):
             a_name, b_name = items[i][0], items[j][0]
-            if a_name.split('.')[0] == b_name.split('.')[0]:
-                continue  # части одного объекта (пад АЗС с колонками/киоском)
+            if a_name != b_name and a_name.split('.')[0] == b_name.split('.')[0]:
+                continue  # части одного объекта (пад АЗС с колонками/киоском); одинаковые имена — это дубль
             if overlap(items[i][1], items[j][1]):
                 errors.append('overlap: %s vs %s' % (a_name, b_name))
     for dn, dr in decor:  # декор-газон может содержать площадки/парковки дворов, но не здания
         for name, r in solids:
             if overlap(dr, r):
                 errors.append('decor %s overlaps building %s' % (dn, name))
+
+    # 3a. Дубли: одинаковые имена, одинаковые объекты (тип и координаты), одинаковые дороги
+    seen_names = {}
+    for name, r in solids + zones + decor:
+        key = (name, tuple(round(v, 2) for v in r))  # одинаковое имя И одинаковый прямоугольник = дубль
+        seen_names[key] = seen_names.get(key, 0) + 1
+    for key, n in seen_names.items():
+        if n > 1:
+            errors.append('duplicate solid/zone: %s %s (x%d)' % (key[0], key[1], n))
+    seen_obj = {}
+    for o in objects:
+        key = (o['type'], round(o['x'], 2), round(o['y'], 2), round(o['z'], 2), round(o.get('rot', 0), 1))
+        seen_obj[key] = seen_obj.get(key, 0) + 1
+    dup_objs = [k for k, n in seen_obj.items() if n > 1]
+    for k in dup_objs[:20]:
+        errors.append('duplicate object: %s at (%.2f, %.2f, %.2f)' % (k[0], k[1], k[2], k[3]))
+    seen_road = {}
+    for r in roads:
+        key = (tuple(r['start']), tuple(r['end']))
+        key = min(key, (key[1], key[0]))
+        seen_road[key] = seen_road.get(key, 0) + 1
+    for k, n in seen_road.items():
+        if n > 1:
+            errors.append('duplicate road segment: %s - %s' % (k[0], k[1]))
+
+    # 3b. Запрещённые объекты ТЗ №031 (мойка, фитнес, вода, железная дорога) — по именам и типам
+    FORBIDDEN = ('wash', 'мойк', 'gym', 'fitness', 'фитнес', 'river', 'lake', 'water', 'рек', 'озер', 'вод',
+                 'rail', 'railway', 'железн', 'жд')
+    all_names = [name for name, _r in solids + zones + decor] + [o['type'] for o in objects] + \
+                [b.get('id', '') for b in buildings] + [p['id'] for p in points]
+    for nm in all_names:
+        low = nm.lower()
+        for w in FORBIDDEN:
+            if w in low:
+                errors.append('forbidden object name/type: %s (match %r)' % (nm, w))
+                break
 
     # 4. Счётчики
     mkd = [b for b in buildings if not b['private']]

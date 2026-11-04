@@ -25,6 +25,7 @@ namespace LifeFromZero.City.Quarter.Tests
             suite.Add("District750: стартовая квартира №67 в bld-n4 (номер квартиры, не дом)", StartApartment);
             suite.Add("District750: обязательные коммерческие и публичные объекты есть", MandatoryCommercial);
             suite.Add("District750: четыре АЗС с уникальными id", FourGasStations);
+            suite.Add("District750: число точек и доставок совпадает с Python-зеркалом", MirrorCounts);
             suite.Add("District750: ровно один круговой перекрёсток и заводские объекты", RoundaboutAndIndustry);
             suite.Add("District750: все объекты и точки доставки внутри границ карты", WithinBounds);
             suite.Add("District750: идентификаторы точек доставки уникальны", UniqueDeliveryIds);
@@ -60,8 +61,12 @@ namespace LifeFromZero.City.Quarter.Tests
             QuarterPlan plan = District();
             IsTrue(plan.PlayerHome != null, "Стартовая квартира задана");
             AreEqual("bld-n4", plan.PlayerHome.BuildingId, "Стартовая квартира — в северном доме bld-n4");
-            AreEqual(67, PlayerHomeInfo.ApartmentNumber, "67 — номер квартиры");
             IsTrue(plan.Buildings.Any(b => b.Id == "bld-n4"), "Дом bld-n4 существует");
+            // Номер берём из данных объекта маркера, а не из константы (иначе тест не может упасть).
+            PlacedObject marker = plan.OfType(QuarterObjectTypes.PlayerHomeMarker).FirstOrDefault();
+            IsTrue(marker != null, "Маркер квартиры есть в данных");
+            AreEqual("67", marker.Param("apartment"), "Маркер несёт номер квартиры 67");
+            AreEqual("bld-n4", marker.Param("buildingId"), "Маркер привязан к bld-n4");
         }
 
         private static void MandatoryCommercial()
@@ -77,6 +82,14 @@ namespace LifeFromZero.City.Quarter.Tests
                 .Concat(plan.DistrictPoints.Select(p => p.Id)));
             foreach (string id in mandatory)
                 IsTrue(ids.Contains(id) || plan.DistrictPoints.Any(p => p.Id == id), "Нет обязательного объекта " + id);
+        }
+
+        /// <summary>Фиксирует число точек карты и доставки как в Python-зеркале (24 и 46).</summary>
+        private static void MirrorCounts()
+        {
+            QuarterPlan plan = District();
+            AreEqual(24, plan.DistrictPoints.Count, "Точек карты (как в district_layout_check.py)");
+            AreEqual(46, plan.DeliveryPoints.Count, "Точек доставки (как в district_layout_check.py)");
         }
 
         private static void FourGasStations()
