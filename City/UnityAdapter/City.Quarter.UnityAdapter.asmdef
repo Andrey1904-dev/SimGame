@@ -1,0 +1,16 @@
+{
+    "name": "LifeFromZero.City.Quarter.UnityAdapter",
+    "rootNamespace": "LifeFromZero.City.Quarter.UnityAdapter",
+    "references": [
+        "LifeFromZero.City.Quarter"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
