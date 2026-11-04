@@ -61,6 +61,8 @@ namespace LifeFromZero.City.Quarter
             private int _nodeSeq;
             private int _buildingSeq;
             private int _courtyardSeq;
+            private PickupPointInfo _pickup;
+            private Rect2? _pickupBlock; // блок с ПВЗ не становится двором, чтобы проезд/парковка не спорили за место
 
             private float[] _lines;       // координаты улиц по каждой оси
             private float CorridorHalf => _o.RoadWidth / 2f + _o.SidewalkWidth;
@@ -77,6 +79,8 @@ namespace LifeFromZero.City.Quarter
                 _lines = new[] { s * 0.20f, s * 0.50f, s * 0.80f };
 
                 BuildRoadNetwork();
+                if (_o.IncludePickupPoint)
+                    PlacePickupPoint();
                 BuildBlocksAndCourtyards();
                 BuildStreetFurniture();
 
@@ -84,7 +88,7 @@ namespace LifeFromZero.City.Quarter
                 foreach (IQuarterObjectPlacer placer in _o.CustomPlacers)
                     placer.Place(context);
 
-                return new QuarterPlan(_o.Seed, s, _objects, _roads, _nodes, _buildings, _courtyards);
+                return new QuarterPlan(_o.Seed, s, _objects, _roads, _nodes, _buildings, _courtyards, _pickup);
             }
 
             // ---------- инфраструктура ----------
@@ -252,6 +256,97 @@ namespace LifeFromZero.City.Quarter
                 }
             }
 
+            // ---------- пункт выдачи заказов (ПВЗ) ----------
+
+            /// <summary>
+            /// Один ПВЗ на квартал: небольшое одноэтажное здание с плоской крышей
+            /// фасадом к улице. Участок резервируется ДО застройки: след здания и
+            /// площадка попадают в _solidFootprints, поэтому дома, деревья и
+            /// площадки дворов туда не встанут, а дома дополнительно проверяются
+            /// тестами против следа ПВЗ.
+            /// Схема участка от улицы: тротуар → площадка (4 м) → здание (глубина 8 м).
+            /// </summary>
+            private void PlacePickupPoint()
+            {
+                const string pickupId = "pvz-01";
+                const float buildingLength = 12f, buildingDepth = 8f, buildingHeight = 3.2f, plazaDepth = 4f;
+
+                // Кандидаты: стороны блоков, выходящие на улицу (южная — если под блоком
+                // есть улица, северная — если над блоком). Фасад всегда смотрит на улицу.
+                var candidates = new List<(Rect2 Block, bool FacesSouth)>();
+                foreach (Rect2 block in BlockRects())
+                {
+                    if (block.MinZ > 1f) candidates.Add((block, true));
+                    if (block.MaxZ < _o.Size - 1f) candidates.Add((block, false));
+                }
+                (Rect2 blk, bool facesSouth) = _rng.Pick(candidates);
+                _pickupBlock = blk;
+
+                float cx = blk.Center.X + _rng.NextRange(-6f, 6f);
+                float frontZ, centerZ;
+                if (facesSouth)
+                {
+                    frontZ = blk.MinZ + plazaDepth;         // фасад — граница площадки и здания
+                    centerZ = frontZ + buildingDepth / 2f;
+                }
+                else
+                {
+                    frontZ = blk.MaxZ - plazaDepth;
+                    centerZ = frontZ - buildingDepth / 2f;
+                }
+                float outward = facesSouth ? -1f : 1f;      // направление от здания к улице
+
+                var buildingRect = Rect2.FromCenterSize(new Vec2(cx, centerZ), buildingLength, buildingDepth);
+                var plazaRect = Rect2.FromCenterSize(
+                    new Vec2(cx, frontZ + outward * plazaDepth / 2f), buildingLength + 2f, plazaDepth);
+                _solidFootprints.Add(buildingRect);
+                _solidFootprints.Add(plazaRect);
+
+                var entrance = new Vec3(cx, 0f, frontZ + outward * 0.3f);
+                var interaction = new Vec3(cx, 0f, frontZ + outward * 1.6f);
+
+                var buildingParams = Params(
+                    ("buildingId", pickupId), ("floors", "1"), ("roof", "flat"),
+                    ("signText", PickupPointInfo.SignText),
+                    ("entrance", Num(entrance.X) + "," + Num(entrance.Z)),
+                    ("interactionPoint", Num(interaction.X) + "," + Num(interaction.Z)));
+                AddObject(QuarterObjectTypes.PickupBuilding, new Vec3(cx, 0f, centerZ), 0f,
+                    new Vec3(buildingLength, buildingHeight, buildingDepth), buildingParams);
+                // Плоская крыша — тонкая плита с небольшим свесом.
+                AddObject(QuarterObjectTypes.PickupRoof, new Vec3(cx, buildingHeight, centerZ), 0f,
+                    new Vec3(buildingLength + 0.6f, 0.25f, buildingDepth + 0.6f),
+                    Params(("buildingId", pickupId)));
+                // Дверь по центру фасада, окна-витрины по бокам, вывеска над дверью.
+                // Поворот фасадных элементов — наружу, к улице (адаптер вешает текст вывески по локальному +Z).
+                float facadeRot = facesSouth ? 180f : 0f;
+                AddObject(QuarterObjectTypes.PickupDoor, new Vec3(cx, 0f, frontZ + outward * 0.08f), facadeRot,
+                    new Vec3(1.2f, 2.2f, 0.15f), Params(("buildingId", pickupId)));
+                foreach (float offsetX in new[] { -4.4f, -2.6f, 2.6f, 4.4f })
+                {
+                    // Y окна — 0.9 (низ окна): адаптер поставит центр на Y + Size.Y/2.
+                    AddObject(QuarterObjectTypes.PickupWindow,
+                        new Vec3(cx + offsetX, 0.9f, frontZ + outward * 0.06f), facadeRot,
+                        new Vec3(1.6f, 1.2f, 0.1f), Params(("buildingId", pickupId)));
+                }
+                AddObject(QuarterObjectTypes.PickupSign, new Vec3(cx, 2.2f, frontZ + outward * 0.15f), facadeRot,
+                    new Vec3(6.5f, 0.8f, 0.18f),
+                    Params(("buildingId", pickupId), ("text", PickupPointInfo.SignText)));
+                // Площадка перед входом — место, где стоит игрок.
+                AddObject(QuarterObjectTypes.PickupPlaza, new Vec3(plazaRect.Center.X, 0f, plazaRect.Center.Z), 0f,
+                    new Vec3(plazaRect.Width, 0.07f, plazaRect.Height),
+                    Params(("buildingId", pickupId)));
+                // Отдельная точка взаимодействия: пока только координаты и назначение,
+                // выдача заказов сюда не зашита (будущий стык с Delivery снаружи модуля).
+                AddObject(QuarterObjectTypes.PickupPoint, interaction, 0f,
+                    new Vec3(0.8f, 0.05f, 0.8f),
+                    Params(("buildingId", pickupId), ("purpose", "delivery.pickup"),
+                           ("interactionRadius", "1.5")));
+
+                _pickup = new PickupPointInfo(pickupId, new Vec2(cx, centerZ), 0f,
+                    new Vec3(buildingLength, buildingHeight, buildingDepth),
+                    entrance, interaction, plazaRect, buildingRect);
+            }
+
             // ---------- блоки, дома, дворы ----------
 
             private List<Rect2> BlockRects()
@@ -272,7 +367,8 @@ namespace LifeFromZero.City.Quarter
                 // Внутренние блоки (не у границы квартала) — кандидаты во дворы.
                 var candidates = new List<Rect2>();
                 foreach (Rect2 b in blocks)
-                    if (b.MinX > 1f && b.MinZ > 1f && b.MaxX < _o.Size - 1f && b.MaxZ < _o.Size - 1f)
+                    if (b.MinX > 1f && b.MinZ > 1f && b.MaxX < _o.Size - 1f && b.MaxZ < _o.Size - 1f &&
+                        !(_pickupBlock.HasValue && b.Equals(_pickupBlock.Value)))
                         candidates.Add(b);
                 // Детерминированно перемешиваем кандидатов seed-ом и берём нужное число дворов.
                 for (int i = candidates.Count - 1; i > 0; i--)
@@ -636,6 +732,14 @@ namespace LifeFromZero.City.Quarter
                   .Append('|').Append(F(r.Start.X)).Append(',').Append(F(r.Start.Z))
                   .Append("->").Append(F(r.End.X)).Append(',').Append(F(r.End.Z))
                   .Append('|').Append(F(r.Width)).Append('\n');
+            if (plan.PickupPoint != null)
+            {
+                PickupPointInfo p = plan.PickupPoint;
+                sb.Append(p.Id).Append("|pickup")
+                  .Append("|entrance=").Append(F(p.Entrance.X)).Append(',').Append(F(p.Entrance.Z))
+                  .Append("|interaction=").Append(F(p.InteractionPoint.X)).Append(',').Append(F(p.InteractionPoint.Z))
+                  .Append('\n');
+            }
             return sb.ToString();
         }
 

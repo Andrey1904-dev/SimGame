@@ -5,6 +5,11 @@ namespace LifeFromZero.City.Quarter.Tests
 {
     public static class QuarterTestSuite
     {
-        public static TestSuite CreateAll() => QuarterGeneratorTests.CreateSuite();
+        public static TestSuite CreateAll()
+        {
+            TestSuite suite = QuarterGeneratorTests.CreateSuite();
+            suite.AddRange(PickupPointTests.CreateSuite());
+            return suite;
+        }
     }
 }

@@ -83,6 +83,8 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             }
 
             go.name = obj.TypeId + "_" + obj.Id;
+            if (obj.TypeId == QuarterObjectTypes.PickupSign)
+                AddSignText(go, obj.Param("text", PickupPointInfo.SignText));
             // План: позиция — центр следа на земле; объём — Size. Ставим центр по высоте.
             go.transform.localPosition = new Vector3(obj.Position.X, obj.Position.Y + obj.Size.Y / 2f, obj.Position.Z);
             go.transform.localRotation = Quaternion.Euler(0f, obj.RotationY, 0f);
@@ -99,7 +101,28 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         private static bool NeedsCollider(string typeId) =>
             typeId == QuarterObjectTypes.Building || typeId == QuarterObjectTypes.Tree ||
             typeId == QuarterObjectTypes.StreetLamp || typeId == QuarterObjectTypes.YardLamp ||
-            typeId == QuarterObjectTypes.Bench || typeId == QuarterObjectTypes.Playground;
+            typeId == QuarterObjectTypes.Bench || typeId == QuarterObjectTypes.Playground ||
+            typeId == QuarterObjectTypes.PickupBuilding;
+
+        /// <summary>
+        /// Текст вывески ПВЗ: встроенный TextMesh (без ассетов и шрифтов из пакетов).
+        /// Ребёнок таблички; локальный масштаб компенсирует масштаб родителя,
+        /// текст смотрит по локальному +Z — генератор поворачивает вывеску фасадом к улице.
+        /// </summary>
+        private static void AddSignText(GameObject sign, string text)
+        {
+            var textObject = new GameObject("SignText");
+            textObject.transform.SetParent(sign.transform, false);
+            textObject.transform.localPosition = new Vector3(0f, 0f, 0.6f);
+            textObject.transform.localScale = new Vector3(0.16f, 1.1f, 1f);
+            var mesh = textObject.AddComponent<TextMesh>();
+            mesh.text = text;
+            mesh.fontSize = 64;
+            mesh.characterSize = 0.35f;
+            mesh.anchor = TextAnchor.MiddleCenter;
+            mesh.alignment = TextAlignment.Center;
+            mesh.color = Color.white;
+        }
 
         private static Vector3 ScaleFor(GameObject go, PlacedObject obj)
         {
@@ -119,6 +142,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 case QuarterObjectTypes.Tree:
                 case QuarterObjectTypes.StreetLamp:
                 case QuarterObjectTypes.YardLamp:
+                case QuarterObjectTypes.PickupPoint: // плоский диск-маркер точки взаимодействия
                     primitive = PrimitiveType.Cylinder;
                     break;
                 default:
@@ -158,6 +182,13 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 case QuarterObjectTypes.Bench: color = new Color(0.45f, 0.3f, 0.18f); break;
                 case QuarterObjectTypes.StreetLamp:
                 case QuarterObjectTypes.YardLamp: color = new Color(0.25f, 0.25f, 0.28f); break;
+                case QuarterObjectTypes.PickupBuilding: color = new Color(0.88f, 0.86f, 0.82f); break;
+                case QuarterObjectTypes.PickupRoof: color = new Color(0.3f, 0.3f, 0.32f); break;
+                case QuarterObjectTypes.PickupDoor: color = new Color(0.15f, 0.3f, 0.55f); break;
+                case QuarterObjectTypes.PickupWindow: color = new Color(0.6f, 0.8f, 0.95f); break;
+                case QuarterObjectTypes.PickupSign: color = new Color(0.95f, 0.45f, 0.1f); break; // оранжевая вывеска
+                case QuarterObjectTypes.PickupPlaza: color = new Color(0.6f, 0.6f, 0.6f); break;
+                case QuarterObjectTypes.PickupPoint: color = new Color(0.95f, 0.6f, 0.1f); break; // маркер взаимодействия
                 case QuarterObjectTypes.Crosswalk:
                 case QuarterObjectTypes.CenterLine:
                 case QuarterObjectTypes.StopLine:

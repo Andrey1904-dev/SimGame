@@ -105,6 +105,9 @@ namespace LifeFromZero.City.Quarter
         /// <summary>Сколько дворов обустраивать (по ТЗ — 2..3). Генератор кладёт min(3, value), но не меньше 2 при value>=2.</summary>
         public int CourtyardCount { get; set; } = 3;
 
+        /// <summary>Ставить ли один пункт выдачи заказов (ПВЗ) у улицы. По умолчанию — да.</summary>
+        public bool IncludePickupPoint { get; set; } = true;
+
         /// <summary>Архетипы домов. Первый — основной; остальные подмешиваются случайно.</summary>
         public List<BuildingArchetype> Archetypes { get; set; } =
             new List<BuildingArchetype> { BuildingArchetype.PanelFiveStorey() };

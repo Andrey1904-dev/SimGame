@@ -33,6 +33,49 @@ namespace LifeFromZero.City.Quarter
         public const string CenterLine = "marking.centerline";   // осевой пунктир разметки
         public const string StopLine = "marking.stopline";       // стоп-линия
         public const string Lawn = "lawn";                       // газон двора
+        public const string PickupBuilding = "pickup.building";  // здание ПВЗ (одноэтажное)
+        public const string PickupRoof = "pickup.roof";          // плоская крыша ПВЗ
+        public const string PickupDoor = "pickup.door";          // входная дверь ПВЗ
+        public const string PickupWindow = "pickup.window";      // окно-витрина ПВЗ
+        public const string PickupSign = "pickup.sign";          // вывеска ПВЗ (параметр text)
+        public const string PickupPlaza = "pickup.plaza";        // площадка перед входом ПВЗ
+        public const string PickupPoint = "pickup.point";        // точка взаимодействия (будущее получение заказов)
+    }
+
+    /// <summary>
+    /// Пункт выдачи заказов: здание + вход + точка будущего взаимодействия.
+    /// Никакой выдачи/экономики здесь нет — только геометрия и координаты,
+    /// к которым позже сможет привязаться Delivery (модуль Delivery не изменяется).
+    /// </summary>
+    public sealed class PickupPointInfo
+    {
+        /// <summary>Текст вывески над входом.</summary>
+        public const string SignText = "ПУНКТ ВЫДАЧИ ЗАКАЗОВ";
+
+        public PickupPointInfo(string id, Vec2 center, float rotationY, Vec3 size,
+                               Vec3 entrance, Vec3 interactionPoint, Rect2 plaza, Rect2 buildingFootprint)
+        {
+            Id = id; Center = center; RotationY = rotationY; Size = size;
+            Entrance = entrance; InteractionPoint = interactionPoint;
+            Plaza = plaza; BuildingFootprint = buildingFootprint;
+        }
+
+        public string Id { get; }
+        /// <summary>Центр здания ПВЗ на земле.</summary>
+        public Vec2 Center { get; }
+        public float RotationY { get; }
+        /// <summary>Габариты здания (длина × высота × глубина), одноэтажное.</summary>
+        public Vec3 Size { get; }
+        /// <summary>Координаты входа (у двери, на площадке).</summary>
+        public Vec3 Entrance { get; }
+        /// <summary>
+        /// Точка взаимодействия PickupPoint: куда встанет игрок, чтобы позже
+        /// получать заказы. Лежит на площадке перед дверью.
+        /// </summary>
+        public Vec3 InteractionPoint { get; }
+        /// <summary>Площадка перед входом (место для игрока), примыкает к тротуару.</summary>
+        public Rect2 Plaza { get; }
+        public Rect2 BuildingFootprint { get; }
     }
 
     /// <summary>
@@ -179,9 +222,20 @@ namespace LifeFromZero.City.Quarter
                            IReadOnlyList<RoadNode> nodes,
                            IReadOnlyList<BuildingInfo> buildings,
                            IReadOnlyList<CourtyardInfo> courtyards)
+            : this(seed, size, objects, roads, nodes, buildings, courtyards, null)
+        {
+        }
+
+        public QuarterPlan(int seed, float size,
+                           IReadOnlyList<PlacedObject> objects,
+                           IReadOnlyList<RoadSegment> roads,
+                           IReadOnlyList<RoadNode> nodes,
+                           IReadOnlyList<BuildingInfo> buildings,
+                           IReadOnlyList<CourtyardInfo> courtyards,
+                           PickupPointInfo pickupPoint)
         {
             Seed = seed; Size = size; Objects = objects; Roads = roads; Nodes = nodes;
-            Buildings = buildings; Courtyards = courtyards;
+            Buildings = buildings; Courtyards = courtyards; PickupPoint = pickupPoint;
         }
 
         public int Seed { get; }
@@ -192,6 +246,8 @@ namespace LifeFromZero.City.Quarter
         public IReadOnlyList<RoadNode> Nodes { get; }
         public IReadOnlyList<BuildingInfo> Buildings { get; }
         public IReadOnlyList<CourtyardInfo> Courtyards { get; }
+        /// <summary>Единственный ПВЗ квартала (null, если генерация шла без него — у генератора всегда есть).</summary>
+        public PickupPointInfo PickupPoint { get; }
 
         public IEnumerable<PlacedObject> OfType(string typeId)
         {
