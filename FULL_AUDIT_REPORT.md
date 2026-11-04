@@ -3,7 +3,8 @@
 Дата: 2026-11-04
 Репозиторий: `Andrey1904-dev/SimGame`
 Ветка: `arena/64fd70a9-simgame`
-Base commit: `bba3d99c796602e9415f52697e22d96de5bb1a97`
+Base commit (пред-аудит): `bba3d99c796602e9415f52697e22d96de5bb1a97`
+**Commit аудита:** `38f625c9660f0bb4104c3c314a2ea13d8e2a612f` (pushed ✅)
 
 ---
 
