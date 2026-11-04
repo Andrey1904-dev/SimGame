@@ -8,7 +8,7 @@
 * `Debts/{Core,Events,Payments,Penalties,Persistence}/**/*.cs`, `Debts/Debts.asmdef`.
 * `UnityIntegrationKit/PhoneSources.cs` **и** `UnityIntegrationKit/AdapterBridges.cs` в `Assets/_Project/SimGame/UnityIntegrationKit/` вне любых родительских asmdef: Assembly-CSharp автоматически ссылается на четыре runtime asmdef. Если в проекте есть родительский asmdef, проверить явные ссылки, не добавлять циклы.
 * Для EditMode: `Economy/Tests/**/*.cs` и `Economy/Tests/Economy.Tests.asmdef`; аналогично `Jobs/Tests/`, `Phone/Tests/`, `Debts/Tests/` со своими asmdef. Сохранить иерархию; тесты Editor-only, `UNITY_INCLUDE_TESTS` и nunit.framework.dll; ни один тест не переносить в runtime.
-* Ожидаемое число тестов после импорта ТЗ №021: **Economy 60**, **Delivery 55**, **Debts 96**, Phone — без изменений. Если в Test Runner число меньше — часть файлов не импортирована (обычно `*FinancialSafetyTests.cs`, `DeliveryFinancialSafetyTests.cs`, `DebtFinancialContractTests.cs`) или не попала в `*TestSuite.cs`.
+* Ожидаемое число тестов после импорта ТЗ №021: **Economy 60**, **Delivery 55**, **Debts 97**, Phone — без изменений. Если в Test Runner число меньше — часть файлов не импортирована (обычно `*FinancialSafetyTests.cs`, `DeliveryFinancialSafetyTests.cs`, `DebtFinancialContractTests.cs`) или не попала в `*TestSuite.cs`.
 
 Новые файлы ТЗ №021, которые обязаны попасть в импорт: `Economy/Core/{FinancialOperationId,IdempotentWalletAdapter,IdempotentInventoryAdapter,WalletOperationState}.cs`,
 `Economy/Shop/{ShopOperation,ShopSnapshot,ShopSnapshotValidator}.cs`,

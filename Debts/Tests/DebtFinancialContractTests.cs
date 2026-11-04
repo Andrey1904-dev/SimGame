@@ -31,6 +31,8 @@ namespace LifeFromZero.Debts.Tests
             suite.Add("Компенсация: флаг возврата переживает снимок", RefundFlagSurvivesSnapshot);
             suite.Add("Недостаток средств: деньги не списываются, paymentId остаётся свободным",
                 InsufficientFundsKeepsIdFree);
+            suite.Add("Платёж: paymentId, зачтённый по другому долгу, отклоняется без списания",
+                PaymentIdUsedForOtherDebtRejected);
 
             return suite;
         }
@@ -199,6 +201,50 @@ namespace LifeFromZero.Debts.Tests
 
             DebtTestEnv.ExpectSuccess(retry, "тем же ID можно заплатить позже");
             MiniTestRunner.AreEqual(4000L, rich.Balance, "списание одно");
+        }
+
+        /// <summary>
+        /// Один и тот же paymentId пытаются использовать для ДВУХ разных долгов. Это не повтор
+        /// (повтор — тот же долг), а конфликт ключей: второй долг не должен выглядеть
+        /// оплаченным, деньги повторно не списываются, запись истории остаётся одна.
+        /// </summary>
+        private static void PaymentIdUsedForOtherDebtRejected()
+        {
+            var clock = new FakeClock();
+            var wallet = new FakeWallet(20000L);
+            DebtService service = DebtTestEnv.CreateService(clock, wallet, null);
+
+            DebtTestEnv.ExpectSuccess(
+                service.CreateDebt(new DebtConfiguration
+                {
+                    DebtId = "debt-2",
+                    CreditorId = DebtTestEnv.CreditorId,
+                    Title = "Второй долг",
+                    PrincipalRubles = 5000L,
+                    DueAtMinutes = 1000L,
+                    GracePeriodMinutes = 0L,
+                    InterestRateBasisPoints = 0
+                }),
+                "второй долг создан");
+
+            DebtTestEnv.ExpectSuccess(service.TryPay(DebtTestEnv.DebtId, 1000L, "debt:shared"), "первый долг оплачен");
+
+            DebtPaymentResult other = service.TryPay("debt-2", 1000L, "debt:shared");
+
+            MiniTestRunner.IsFalse(other.IsSuccess, "платёж по другому долгу не считается успешным");
+            MiniTestRunner.AreEqual(DebtResultCode.DuplicatePayment, other.Code, "причина — ключ занят другим долгом");
+            MiniTestRunner.AreEqual(19000L, wallet.Balance, "второго списания нет");
+            MiniTestRunner.AreEqual(1, wallet.DebitCalls, "вызов списания остался один");
+            MiniTestRunner.AreEqual(1, service.GetPaymentHistory(DebtTestEnv.DebtId).Count, "история первого долга");
+            MiniTestRunner.AreEqual(0, service.GetPaymentHistory("debt-2").Count, "история второго долга пуста");
+
+            service.TryGetDebt("debt-2", out DebtView view);
+            MiniTestRunner.AreEqual(5000L, view.TotalRemaining, "второй долг не уменьшен");
+
+            // Тот же ключ для СВОЕГО долга остаётся идемпотентным повтором.
+            DebtPaymentResult replay = service.TryPay(DebtTestEnv.DebtId, 1000L, "debt:shared");
+            DebtTestEnv.ExpectSuccess(replay, "повтор по своему долгу");
+            MiniTestRunner.AreEqual(1000L, replay.PaidRubles, "прежняя сумма");
         }
 
     }
