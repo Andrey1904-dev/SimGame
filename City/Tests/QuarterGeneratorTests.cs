@@ -149,11 +149,19 @@ namespace LifeFromZero.City.Quarter.Tests
                 IsTrue(perFloor >= 2.8f && perFloor <= 3.2f,
                     "Дом " + b.Id + ": высота этажа " + perFloor);
                 if (b.Floors == 3) c3++; else if (b.Floors == 5) c5++; else if (b.Floors == 9) c9++; else c10++;
-                // Стиль и крыша согласованы с этажностью по архетипам по умолчанию.
-                if (b.Floors == 3) { AreEqual("brick", b.FacadeStyle, "Трёхэтажка — кирпич"); AreEqual("pitched", b.RoofType, "Трёхэтажка — скатная крыша"); }
-                if (b.Floors == 5) { AreEqual("panel", b.FacadeStyle, "Пятиэтажка — панель"); }
-                if (b.Floors == 9) { AreEqual("panel", b.FacadeStyle, "Девятиэтажка — панель"); AreEqual("building.panel9", b.ArchetypeId, "Девятиэтажка — отдельный архетип"); }
-                if (b.Floors == 10) { AreEqual("modern", b.FacadeStyle, "Десятиэтажка — современная"); }
+                // Стиль/крыша — из архитектурного варианта дома (см. BuildingVariantCatalog).
+                if (b.Floors == 3)
+                {
+                    IsTrue(b.FacadeStyle == "brick" || b.FacadeStyle == "plaster", "Трёхэтажка — кирпич/штукатурка");
+                    AreEqual("pitched", b.RoofType, "Трёхэтажка — скатное семейство крыш");
+                }
+                if (b.Floors == 5) IsTrue(b.FacadeStyle == "panel" || b.FacadeStyle == "brick", "Пятиэтажка — панель/кирпич");
+                if (b.Floors == 9)
+                {
+                    IsTrue(b.FacadeStyle == "panel" || b.FacadeStyle == "brick" || b.FacadeStyle == "modern", "Девятиэтажка — вариант стиля");
+                    AreEqual("building.panel9", b.ArchetypeId, "Девятиэтажка — отдельный архетип");
+                }
+                if (b.Floors == 10) IsTrue(b.FacadeStyle == "modern" || b.FacadeStyle == "brick", "Десятиэтажка — современная/кирпич");
                 IsTrue(!string.IsNullOrEmpty(b.FacadeColor), "Дом " + b.Id + ": задан цвет фасада");
             }
             IsTrue(c3 >= 1 && c5 >= 1 && c9 >= 1 && c10 >= 1,

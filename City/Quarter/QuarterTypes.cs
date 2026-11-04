@@ -58,6 +58,8 @@ namespace LifeFromZero.City.Quarter
         public const string TrashContainer = "yard.trash";       // мусорный контейнер
         public const string Bush = "yard.bush";                  // куст
         public const string Footpath = "yard.footpath";          // пешеходная дорожка во дворе
+        public const string YardFence = "yard.fence";            // ограждение палисадника/площадки
+        public const string RoadPatch = "road.patch";            // асфальтовая заплатка на проезде/улице
         // Подвал под трёхэтажкой
         public const string BasementFloor = "basement.floor";
         public const string BasementWall = "basement.wall";
@@ -360,11 +362,23 @@ namespace LifeFromZero.City.Quarter
         public BuildingInfo(string id, string archetypeId, Vec2 center, float rotationY, Vec3 size,
                             int floors, IReadOnlyList<Vec2> entrances,
                             string facadeStyle, string roofType, string facadeColor, bool isPlayerHome)
+            : this(id, archetypeId, center, rotationY, size, floors, entrances,
+                   facadeStyle, roofType, facadeColor, isPlayerHome, null, "standard", "open", roofType, 0.4f, 0)
+        {
+        }
+
+        public BuildingInfo(string id, string archetypeId, Vec2 center, float rotationY, Vec3 size,
+                            int floors, IReadOnlyList<Vec2> entrances,
+                            string facadeStyle, string roofType, string facadeColor, bool isPlayerHome,
+                            string variantId, string windowStyle, string balconyType, string roofVariant,
+                            float wearLevel, int balconyOffset)
         {
             Id = id; ArchetypeId = archetypeId; Center = center; RotationY = rotationY;
             Size = size; Floors = floors; Entrances = entrances;
             FacadeStyle = facadeStyle; RoofType = roofType; FacadeColor = facadeColor;
             IsPlayerHome = isPlayerHome;
+            VariantId = variantId; WindowStyle = windowStyle; BalconyType = balconyType;
+            RoofVariant = roofVariant; WearLevel = wearLevel; BalconyOffset = balconyOffset;
         }
 
         public string Id { get; }
@@ -382,6 +396,18 @@ namespace LifeFromZero.City.Quarter
         public string FacadeColor { get; }
         /// <summary>Это дом игрока (player.home).</summary>
         public bool IsPlayerHome { get; }
+        /// <summary>Архитектурный вариант из BuildingVariantCatalog (null у старых вызовов).</summary>
+        public string VariantId { get; }
+        /// <summary>Форма окон: standard | wide | tall.</summary>
+        public string WindowStyle { get; }
+        /// <summary>Балконы: none | open | glazed | loggia.</summary>
+        public string BalconyType { get; }
+        /// <summary>Форма крыши: flat | flat-parapet | pitched | pitched-steep | mansard.</summary>
+        public string RoofVariant { get; }
+        /// <summary>Износ фасада 0..1 (свежая краска .. обжитой старый фасад).</summary>
+        public float WearLevel { get; }
+        /// <summary>Сдвиг рисунка балконов 0..2, чтобы ряды окон/балконов не повторялись.</summary>
+        public int BalconyOffset { get; }
 
         public Rect2 Footprint
         {

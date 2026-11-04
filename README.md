@@ -8,7 +8,7 @@
 | `Jobs/Delivery/` — курьерские заказы | `LifeFromZero.Jobs.Delivery` | 55 | `Jobs/INTEGRATION.md` |
 | `Phone/` — смартфон, сообщения, контакты, уведомления | `LifeFromZero.Phone` | 93 | `Phone/INTEGRATION.md` |
 | `Debts/` — долги, платежи, штрафы, стадии взыскания | `LifeFromZero.Debts` | 97 | `Debts/INTEGRATION.md` |
-| `City/` — процедурный генератор квартала 250×250 (ТЗ №023) | `LifeFromZero.City.Quarter` | 44 | `City/README.md` |
+| `City/` — процедурный генератор квартала 250×250 (ТЗ №023) | `LifeFromZero.City.Quarter` | 53 | `City/README.md` |
 
 Полный аудит четырёх модулей (ТЗ №017), найденные дефекты, план подключения
 к Unity и инструкция для Codex: **`FULL_AUDIT_REPORT.md`**,

@@ -134,25 +134,48 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             Quaternion facing = Quaternion.LookRotation(normal, Vector3.up);
             string suffix = "_" + obj.Id;
 
+            string entranceStyle = obj.Param("entranceStyle", "flat-canopy");
+            string doorColor = obj.Param("doorColor");
+
             var door = GameObject.CreatePrimitive(PrimitiveType.Cube);
             door.name = "entrance.door" + suffix;
             door.transform.SetParent(root, false);
             door.transform.localPosition = wallPoint + normal * 0.06f + Vector3.up * 1.05f;
             door.transform.localRotation = facing;
             door.transform.localScale = new Vector3(1.1f, 2.1f, 0.1f);
-            door.GetComponent<Renderer>().sharedMaterial = MaterialFor("entrance.door");
+            door.GetComponent<Renderer>().sharedMaterial = MaterialFromHex(doorColor, "entrance.door");
             door.isStatic = true;
 
             var canopy = GameObject.CreatePrimitive(PrimitiveType.Cube);
             canopy.name = "entrance.canopy" + suffix;
             canopy.transform.SetParent(root, false);
             canopy.transform.localPosition = wallPoint + normal * 0.55f + Vector3.up * 2.3f;
-            canopy.transform.localRotation = facing;
+            canopy.transform.localRotation = entranceStyle == "sloped-canopy"
+                ? facing * Quaternion.Euler(-18f, 0f, 0f) // наклонный козырёк
+                : facing;
             canopy.transform.localScale = new Vector3(1.9f, 0.1f, 1.1f);
             canopy.GetComponent<Renderer>().sharedMaterial = MaterialFor("entrance.canopy");
             canopy.isStatic = true;
             var canopyCollider = canopy.GetComponent<Collider>();
             if (canopyCollider != null) Destroy(canopyCollider);
+
+            if (entranceStyle == "porch")
+            {
+                // Входная группа с крыльцом: две стойки по краям козырька.
+                Vector3 side = Vector3.Cross(Vector3.up, normal).normalized;
+                for (int s = -1; s <= 1; s += 2)
+                {
+                    var post = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    post.name = "entrance.porch-post" + suffix;
+                    post.transform.SetParent(root, false);
+                    post.transform.localPosition = wallPoint + normal * 1.0f + side * s * 0.85f + Vector3.up * 1.15f;
+                    post.transform.localScale = new Vector3(0.09f, 2.3f, 0.09f);
+                    post.GetComponent<Renderer>().sharedMaterial = MaterialFor("entrance.canopy");
+                    post.isStatic = true;
+                    var postCollider = post.GetComponent<Collider>();
+                    if (postCollider != null) Destroy(postCollider);
+                }
+            }
 
             string number = obj.Param("entranceNumber");
             if (!string.IsNullOrEmpty(number))
@@ -270,16 +293,36 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             int floors = Mathf.RoundToInt(ParseFloat(obj.Param("floors"), 5f));
             if (floors < 1) floors = 1;
             string style = obj.Param("style", "panel");
-            string roof = obj.Param("roof", "flat");
+            string roofVariant = obj.Param("roofVariant", obj.Param("roof", "flat"));
+            string windowStyle = obj.Param("windowStyle", "standard");
+            string balconyType = obj.Param("balconyType", "open");
+            int balconyOffset = Mathf.RoundToInt(ParseFloat(obj.Param("balconyOffset"), 0f));
+            float wear = ParseFloat(obj.Param("wear"), 0.4f);
             float length = obj.Size.X, height = obj.Size.Y, depth = obj.Size.Z;
             float floorHeight = height / floors;
 
+            Vector2 windowSize;
+            switch (windowStyle)
+            {
+                case "wide": windowSize = new Vector2(1.7f, 1.2f); break;
+                case "tall": windowSize = new Vector2(1.1f, 1.6f); break;
+                default: windowSize = new Vector2(1.3f, 1.35f); break;
+            }
+
             var windows = new MeshBuilder();
+            var frames = new MeshBuilder();
             var concrete = new MeshBuilder();
             var seams = new MeshBuilder();
+            var extras = new MeshBuilder();
 
             int perFloor = Mathf.FloorToInt(length / 3f);
+            int perFloorParam = Mathf.RoundToInt(ParseFloat(obj.Param("windowsPerFloor"), 0f));
+            if (perFloorParam > 0) perFloor = perFloorParam;
             if (perFloor < 2) perFloor = 2;
+
+            var patchSet = new HashSet<string>(SplitList(obj.Param("patchWindows")));
+            var acSet = new HashSet<string>(SplitList(obj.Param("acUnits")));
+
             for (int floor = 0; floor < floors; floor++)
             {
                 float y = 1.55f + floor * floorHeight;
@@ -290,20 +333,61 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                     for (int side = -1; side <= 1; side += 2)
                     {
                         float facadeZ = side * (depth / 2f);
-                        windows.AddBox(new Vector3(x, y, facadeZ + side * 0.04f), new Vector3(1.3f, 1.35f, 0.07f));
-                        // Балконы со второго этажа, каждое третье окно.
-                        if (floor >= 1 && i % 3 == 1)
+                        // Рама чуть больше стекла и выступает меньше: окно читается как окно, а не пятно.
+                        frames.AddBox(new Vector3(x, y, facadeZ + side * 0.03f),
+                            new Vector3(windowSize.x + 0.16f, windowSize.y + 0.16f, 0.05f));
+                        windows.AddBox(new Vector3(x, y, facadeZ + side * 0.055f),
+                            new Vector3(windowSize.x, windowSize.y, 0.06f));
+                        string key = floor + ":" + i + ":" + side;
+                        if (patchSet.Contains(key))
+                            seams.AddBox(new Vector3(x, y, facadeZ + side * 0.045f),
+                                new Vector3(windowSize.x + 0.3f, windowSize.y + 0.3f, 0.04f)); // отремонтированный участок фасада
+                        if (acSet.Contains(key))
+                            extras.AddBox(new Vector3(x, y - windowSize.y / 2f - 0.45f, facadeZ + side * 0.22f),
+                                new Vector3(0.75f, 0.55f, 0.28f)); // кондиционер под окном
+
+                        // Балконы/лоджии со второго этажа; рисунок сдвинут на balconyOffset.
+                        if (floor >= 1 && balconyType != "none" && (i + balconyOffset) % 3 == 1)
                         {
-                            concrete.AddBox(new Vector3(x, y - 0.78f, facadeZ + side * 0.5f), new Vector3(2f, 0.12f, 1f)); // плита
-                            concrete.AddBox(new Vector3(x, y - 0.3f, facadeZ + side * 0.98f), new Vector3(2f, 0.85f, 0.05f)); // ограждение спереди
-                            concrete.AddBox(new Vector3(x - 0.98f, y - 0.3f, facadeZ + side * 0.5f), new Vector3(0.05f, 0.85f, 1f));
-                            concrete.AddBox(new Vector3(x + 0.98f, y - 0.3f, facadeZ + side * 0.5f), new Vector3(0.05f, 0.85f, 1f));
+                            float slabY = y - 0.82f;
+                            if (balconyType == "loggia")
+                            {
+                                concrete.AddBox(new Vector3(x, slabY + floorHeight / 2f - 0.4f, facadeZ + side * 0.5f),
+                                    new Vector3(2.1f, 0.14f, 1.05f)); // плита лоджии (потолок)
+                                concrete.AddBox(new Vector3(x - 1.02f, y + 0.2f, facadeZ + side * 0.5f),
+                                    new Vector3(0.09f, floorHeight - 0.3f, 1.05f)); // боковые стены лоджии
+                                concrete.AddBox(new Vector3(x + 1.02f, y + 0.2f, facadeZ + side * 0.5f),
+                                    new Vector3(0.09f, floorHeight - 0.3f, 1.05f));
+                                concrete.AddBox(new Vector3(x, slabY + 0.45f, facadeZ + side * 1.0f),
+                                    new Vector3(2.1f, 0.9f, 0.08f)); // ограждение лоджии
+                                concrete.AddBox(new Vector3(x, slabY, facadeZ + side * 0.5f),
+                                    new Vector3(2.1f, 0.12f, 1.05f));
+                            }
+                            else if (balconyType == "glazed")
+                            {
+                                concrete.AddBox(new Vector3(x, slabY, facadeZ + side * 0.5f), new Vector3(2f, 0.12f, 1f)); // плита
+                                windows.AddBox(new Vector3(x, slabY + 0.85f, facadeZ + side * 0.98f),
+                                    new Vector3(1.9f, 1.55f, 0.05f)); // остекление спереди
+                                windows.AddBox(new Vector3(x - 0.98f, slabY + 0.85f, facadeZ + side * 0.5f),
+                                    new Vector3(0.05f, 1.55f, 0.95f));
+                                windows.AddBox(new Vector3(x + 0.98f, slabY + 0.85f, facadeZ + side * 0.5f),
+                                    new Vector3(0.05f, 1.55f, 0.95f));
+                                concrete.AddBox(new Vector3(x, slabY + 1.68f, facadeZ + side * 0.5f),
+                                    new Vector3(2f, 0.1f, 1f)); // крыша застеклённого балкона
+                            }
+                            else // open
+                            {
+                                concrete.AddBox(new Vector3(x, slabY, facadeZ + side * 0.5f), new Vector3(2f, 0.12f, 1f));
+                                concrete.AddBox(new Vector3(x, slabY + 0.48f, facadeZ + side * 0.98f), new Vector3(2f, 0.85f, 0.05f));
+                                concrete.AddBox(new Vector3(x - 0.98f, slabY + 0.48f, facadeZ + side * 0.5f), new Vector3(0.05f, 0.85f, 1f));
+                                concrete.AddBox(new Vector3(x + 0.98f, slabY + 0.48f, facadeZ + side * 0.5f), new Vector3(0.05f, 0.85f, 1f));
+                            }
                         }
                     }
                 }
             }
 
-            // Панельные швы пятиэтажек: горизонтали по этажам + вертикали каждые 3 м.
+            // Панельные швы панельных домов.
             if (style == "panel")
             {
                 for (int floor = 1; floor < floors; floor++)
@@ -317,18 +401,70 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                         seams.AddBox(new Vector3(x, height / 2f, side * (depth / 2f + 0.02f)), new Vector3(0.05f, height, 0.03f));
             }
 
-            // Крыша: плоская — плита; скатная — призма.
+            // Водосточные трубы по торцам фасадов.
+            foreach (string part in SplitList(obj.Param("drainpipes")))
+            {
+                if (!float.TryParse(part, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out float pipeX)) continue;
+                for (int side = -1; side <= 1; side += 2)
+                    seams.AddBox(new Vector3(pipeX, height / 2f, side * (depth / 2f + 0.14f)),
+                        new Vector3(0.13f, height, 0.13f));
+            }
+
+            // Износ: потемнение цоколя; у старых домов — и потёки под крышей.
+            if (wear > 0.3f)
+            {
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    seams.AddBox(new Vector3(0f, 0.4f, side * (depth / 2f + 0.03f)), new Vector3(length, 0.8f, 0.04f));
+                    if (wear > 0.6f)
+                        seams.AddBox(new Vector3(0f, height - 0.35f, side * (depth / 2f + 0.03f)), new Vector3(length, 0.7f, 0.04f));
+                }
+            }
+
+            // Технадстройка (выход на крышу/лифтовая) на плоских крышах домов от 5 этажей.
+            if (floors >= 5 && (roofVariant == "flat" || roofVariant == "flat-parapet"))
+                concrete.AddBox(new Vector3(length / 4f, height + 0.6f, 0f), new Vector3(4f, 1.2f, 3f));
+
+            // Крыши по вариантам.
             var roofBuilder = new MeshBuilder();
-            if (roof == "pitched")
-                roofBuilder.AddPrism(new Vector3(0f, height, 0f), length + 0.5f, depth + 0.6f, Mathf.Min(2.6f, depth * 0.28f));
-            else
-                roofBuilder.AddBox(new Vector3(0f, height + 0.12f, 0f), new Vector3(length + 0.4f, 0.25f, depth + 0.4f));
+            switch (roofVariant)
+            {
+                case "pitched":
+                    roofBuilder.AddPrism(new Vector3(0f, height, 0f), length + 0.5f, depth + 0.6f, Mathf.Min(2.6f, depth * 0.28f));
+                    break;
+                case "pitched-steep":
+                    roofBuilder.AddPrism(new Vector3(0f, height, 0f), length + 0.5f, depth + 0.6f, Mathf.Min(3.8f, depth * 0.42f));
+                    break;
+                case "mansard":
+                    roofBuilder.AddPrism(new Vector3(0f, height, 0f), length + 0.4f, depth + 0.5f, 1.5f);
+                    roofBuilder.AddBox(new Vector3(0f, height + 1.6f, 0f), new Vector3(length * 0.72f, 0.22f, depth * 0.55f));
+                    break;
+                case "flat-parapet":
+                    roofBuilder.AddBox(new Vector3(0f, height + 0.12f, 0f), new Vector3(length + 0.4f, 0.25f, depth + 0.4f));
+                    roofBuilder.AddBox(new Vector3(0f, height + 0.45f, depth / 2f + 0.1f), new Vector3(length + 0.4f, 0.5f, 0.18f));
+                    roofBuilder.AddBox(new Vector3(0f, height + 0.45f, -depth / 2f - 0.1f), new Vector3(length + 0.4f, 0.5f, 0.18f));
+                    roofBuilder.AddBox(new Vector3(length / 2f + 0.1f, height + 0.45f, 0f), new Vector3(0.18f, 0.5f, depth + 0.4f));
+                    roofBuilder.AddBox(new Vector3(-length / 2f - 0.1f, height + 0.45f, 0f), new Vector3(0.18f, 0.5f, depth + 0.4f));
+                    break;
+                default: // flat
+                    roofBuilder.AddBox(new Vector3(0f, height + 0.12f, 0f), new Vector3(length + 0.4f, 0.25f, depth + 0.4f));
+                    break;
+            }
 
             CreateDetailMesh(windows, "detail.windows", obj, root, MaterialFor("detail.glass"));
+            CreateDetailMesh(frames, "detail.frames", obj, root, MaterialFor("detail.frame"));
             CreateDetailMesh(concrete, "detail.balconies", obj, root, MaterialFor("detail.concrete"));
             CreateDetailMesh(seams, "detail.seams", obj, root, MaterialFor("detail.seam"));
+            CreateDetailMesh(extras, "detail.extras", obj, root, MaterialFor("detail.ac"));
             CreateDetailMesh(roofBuilder, "detail.roof", obj, root,
-                MaterialFor(roof == "pitched" ? "detail.roof.pitched" : "detail.roof.flat"));
+                MaterialFor(roofVariant == "flat" || roofVariant == "flat-parapet" ? "detail.roof.flat" : "detail.roof.pitched"));
+        }
+
+        private static string[] SplitList(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return new string[0];
+            return value.Split(new[] { ';' }, System.StringSplitOptions.RemoveEmptyEntries);
         }
 
         private void CreateDetailMesh(MeshBuilder builder, string name, PlacedObject building, Transform root, Material material)
@@ -476,7 +612,32 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             }
             if (obj.TypeId == QuarterObjectTypes.Tree)
                 return MaterialFor("tree.trunk");
+            if (obj.TypeId == QuarterObjectTypes.Bench)
+                return MaterialFor(obj.Param("benchStyle") == "new" ? "bench.new" : "bench.old");
+            if (obj.TypeId == QuarterObjectTypes.YardFence)
+                return MaterialFor(obj.Param("fenceStyle") == "wood" ? "fence.wood" : "fence.metal");
+            if (obj.TypeId == QuarterObjectTypes.Playground)
+            {
+                string variant = obj.Param("playgroundVariant");
+                return MaterialFor(variant == "2" ? "playground.2" : variant == "3" ? "playground.3" : "playground.1");
+            }
             return MaterialFor(obj.TypeId);
+        }
+
+        /// <summary>Материал по hex-цвету из данных (кэш по цвету, не по объекту).</summary>
+        private Material MaterialFromHex(string hex, string fallbackKey)
+        {
+            if (!string.IsNullOrEmpty(hex) && ColorUtility.TryParseHtmlString(hex, out Color parsed))
+            {
+                string key = "hex:" + hex;
+                if (!_materials.TryGetValue(key, out Material cached))
+                {
+                    cached = CreateMaterial(parsed);
+                    _materials[key] = cached;
+                }
+                return cached;
+            }
+            return MaterialFor(fallbackKey);
         }
 
         private Material CreateMaterial(Color color)
@@ -530,6 +691,17 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 case "tree.trunk": color = new Color(0.4f, 0.28f, 0.18f); break;
                 case "tree.canopy": color = new Color(0.22f, 0.5f, 0.22f); break;
                 case "detail.glass": color = new Color(0.55f, 0.72f, 0.88f); break;
+                case "detail.frame": color = new Color(0.92f, 0.9f, 0.85f); break;
+                case "detail.ac": color = new Color(0.88f, 0.88f, 0.86f); break;
+                case "bench.new": color = new Color(0.55f, 0.38f, 0.2f); break;
+                case "bench.old": color = new Color(0.38f, 0.3f, 0.24f); break;
+                case "fence.wood": color = new Color(0.5f, 0.38f, 0.24f); break;
+                case "fence.metal": color = new Color(0.45f, 0.5f, 0.48f); break;
+                case "playground.1": color = new Color(0.85f, 0.55f, 0.25f); break;
+                case "playground.2": color = new Color(0.3f, 0.55f, 0.75f); break;
+                case "playground.3": color = new Color(0.45f, 0.65f, 0.35f); break;
+                case QuarterObjectTypes.RoadPatch: color = new Color(0.1f, 0.1f, 0.11f); break;
+                case QuarterObjectTypes.YardFence: color = new Color(0.5f, 0.38f, 0.24f); break;
                 case "detail.concrete": color = new Color(0.75f, 0.75f, 0.73f); break;
                 case "detail.seam": color = new Color(0.45f, 0.44f, 0.42f); break;
                 case "detail.roof.flat": color = new Color(0.32f, 0.32f, 0.34f); break;

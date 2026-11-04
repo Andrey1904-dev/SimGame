@@ -70,6 +70,10 @@ namespace LifeFromZero.City.Quarter
             private readonly List<DeliveryPointInfo> _deliveryPoints = new List<DeliveryPointInfo>();
             private readonly List<RealEstateProperty> _properties = new List<RealEstateProperty>();
             private readonly HashSet<int> _placedFloors = new HashSet<int>(); // какие этажности уже стоят (гарантия разнообразия)
+            private readonly Dictionary<int, HashSet<string>> _usedVariants = new Dictionary<int, HashSet<string>>();
+            // Сигнатуры уже стоящих домов: соседние дома не должны совпадать комбинацией.
+            private readonly List<(Vec2 Center, string VariantId, string Color, int BalconyOffset)> _signatures =
+                new List<(Vec2, string, string, int)>();
 
             private float[] _lines;       // координаты улиц по каждой оси
             private float CorridorHalf => _o.RoadWidth / 2f + _o.SidewalkWidth;
@@ -500,6 +504,10 @@ namespace LifeFromZero.City.Quarter
                 _placedFloors.Add(arch.Floors);
                 string buildingId = "bld-" + (++_buildingSeq).ToString("D3", CultureInfo.InvariantCulture);
 
+                BuildingVariant variant = PickVariant(arch.Floors, center,
+                    out string color, out int playerBalconyOffset, out float playerWear);
+                string doorColor = _rng.Pick(DoorColors);
+
                 int entranceCount = Math.Max(1, (int)Math.Round(length / arch.EntranceSpacing));
                 var entrances = new List<Vec2>();
                 float halfDepth = arch.Depth / 2f + 0.4f;
@@ -513,20 +521,31 @@ namespace LifeFromZero.City.Quarter
                         new Vec3(3f, 3f, 1f),
                         Params(("buildingId", buildingId),
                                ("entranceNumber", (e + 1).ToString(CultureInfo.InvariantCulture)),
-                               ("normalX", Num(facadeNormal.X)), ("normalZ", Num(facadeNormal.Z))));
+                               ("normalX", Num(facadeNormal.X)), ("normalZ", Num(facadeNormal.Z)),
+                               ("entranceStyle", variant.EntranceStyle), ("doorColor", doorColor)));
                 }
 
-                string color = FacadeColorFor(arch.FacadeStyle);
                 _buildings.Add(new BuildingInfo(buildingId, arch.Id, center, rot, size, arch.Floors,
-                    entrances, arch.FacadeStyle, arch.RoofType, color, isPlayerHome: true));
+                    entrances, variant.FacadeStyle, variant.RoofType, color, isPlayerHome: true,
+                    variant.Id, variant.WindowStyle, variant.BalconyType, variant.RoofVariant,
+                    playerWear, playerBalconyOffset));
+                var playerParams = Params(
+                    ("buildingId", buildingId), ("archetype", arch.Id),
+                    ("floors", arch.Floors.ToString(CultureInfo.InvariantCulture)),
+                    ("entrances", entranceCount.ToString(CultureInfo.InvariantCulture)),
+                    ("style", variant.FacadeStyle), ("roof", variant.RoofType),
+                    ("facadeColor", color),
+                    ("variant", variant.Id), ("roofVariant", variant.RoofVariant),
+                    ("windowStyle", variant.WindowStyle), ("balconyType", variant.BalconyType),
+                    ("balconyOffset", playerBalconyOffset.ToString(CultureInfo.InvariantCulture)),
+                    ("wear", playerWear.ToString("0.##", CultureInfo.InvariantCulture)),
+                    ("entranceStyle", variant.EntranceStyle), ("doorColor", doorColor),
+                    ("specialId", PlayerHomeInfo.SpecialId),
+                    ("apartment", PlayerHomeInfo.ApartmentNumber.ToString(CultureInfo.InvariantCulture)));
+                foreach (KeyValuePair<string, string> kv in FacadeDetailParams(length, arch.Floors))
+                    playerParams[kv.Key] = kv.Value;
                 AddObject(QuarterObjectTypes.Building, new Vec3(center.X, 0f, center.Z), rot, size,
-                    Params(("buildingId", buildingId), ("archetype", arch.Id),
-                           ("floors", arch.Floors.ToString(CultureInfo.InvariantCulture)),
-                           ("entrances", entranceCount.ToString(CultureInfo.InvariantCulture)),
-                           ("style", arch.FacadeStyle), ("roof", arch.RoofType),
-                           ("facadeColor", color),
-                           ("specialId", PlayerHomeInfo.SpecialId),
-                           ("apartment", PlayerHomeInfo.ApartmentNumber.ToString(CultureInfo.InvariantCulture))));
+                    playerParams);
 
                 Vec2 doorGround = entrances[0];
                 var door = new Vec3(doorGround.X, 0f, doorGround.Z);
@@ -544,17 +563,90 @@ namespace LifeFromZero.City.Quarter
                 _playerHome = new PlayerHomeInfo(buildingId, center, rot, door, exit);
             }
 
-            /// <summary>Цвет фасада по стилю: палитра на стиль, выбор — seed-ом (детерминированно).</summary>
-            private string FacadeColorFor(string style)
+            private static readonly string[] DoorColors = { "#5A3A22", "#2F4F6F", "#4A4A4A", "#6B2F2F", "#33523B" };
+
+            /// <summary>
+            /// Выбор архитектурного варианта дома с защитой от повторов:
+            /// 1) вариант не должен совпадать с вариантом дома в радиусе 60 м;
+            /// 2) пока не использованы все варианты этажности — берём неиспользованные;
+            /// 3) если вариант всё же совпал с соседом, комбинацию разводим цветом
+            ///    фасада и сдвигом рисунка балконов (BalconyOffset).
+            /// </summary>
+            private BuildingVariant PickVariant(int floors, Vec2 center,
+                                                out string facadeColor, out int balconyOffset, out float wear)
             {
-                string[] palette;
-                switch (style)
+                IReadOnlyList<BuildingVariant> variants = BuildingVariantCatalog.ForFloors(floors);
+                var neighborVariants = new HashSet<string>();
+                foreach ((Vec2 c, string v, string col, int off) in _signatures)
+                    if (c.DistanceTo(center) < 60f)
+                        neighborVariants.Add(v);
+
+                var candidates = new List<BuildingVariant>();
+                foreach (BuildingVariant v in variants)
+                    if (!neighborVariants.Contains(v.Id))
+                        candidates.Add(v);
+                if (candidates.Count == 0)
+                    candidates.AddRange(variants);
+
+                if (!_usedVariants.TryGetValue(floors, out HashSet<string> used))
                 {
-                    case "brick": palette = new[] { "#A55E41", "#C7B299", "#B98A5F", "#9C6642" }; break;
-                    case "modern": palette = new[] { "#9FB4C7", "#D8DDE2", "#8FA3B0", "#B9C8D4" }; break;
-                    default: palette = new[] { "#C8B8A2", "#B7C0C4", "#D6C9B0", "#C4A484" }; break; // panel
+                    used = new HashSet<string>();
+                    _usedVariants[floors] = used;
                 }
-                return _rng.Pick(palette);
+                var unused = new List<BuildingVariant>();
+                foreach (BuildingVariant v in candidates)
+                    if (!used.Contains(v.Id))
+                        unused.Add(v);
+                BuildingVariant variant = _rng.Pick(unused.Count > 0 ? unused : candidates);
+                used.Add(variant.Id);
+
+                // Цвет: не повторяем пару (вариант, цвет) у соседей, если палитра позволяет.
+                var neighborPairs = new HashSet<string>();
+                foreach ((Vec2 c, string v, string col, int off) in _signatures)
+                    if (c.DistanceTo(center) < 60f && v == variant.Id)
+                        neighborPairs.Add(col);
+                var colors = new List<string>();
+                foreach (string col in variant.Palette)
+                    if (!neighborPairs.Contains(col))
+                        colors.Add(col);
+                facadeColor = _rng.Pick(colors.Count > 0 ? colors : variant.Palette);
+
+                balconyOffset = _rng.NextInt(0, 3);
+                foreach ((Vec2 c, string v, string col, int off) in _signatures)
+                    if (c.DistanceTo(center) < 60f && v == variant.Id && col == facadeColor && off == balconyOffset)
+                        balconyOffset = (balconyOffset + 1) % 3;
+
+                wear = variant.Wear + _rng.NextRange(-0.08f, 0.12f);
+                if (wear < 0f) wear = 0f;
+                if (wear > 1f) wear = 1f;
+
+                _signatures.Add((center, variant.Id, facadeColor, balconyOffset));
+                return variant;
+            }
+
+            /// <summary>
+            /// Фасадные мелочи здания в параметрах объекта: кондиционеры и «заплатки»
+            /// ремонта как явные позиции (этаж:окно:сторона), водосточные трубы —
+            /// смещения от центра вдоль корпуса. Адаптер строит по ним геометрию.
+            /// </summary>
+            private Dictionary<string, string> FacadeDetailParams(float length, int floors)
+            {
+                int perFloor = Math.Max(2, (int)Math.Floor(length / 3f));
+                var ac = new List<string>();
+                int acCount = _rng.NextInt(0, floors >= 9 ? 5 : 3);
+                for (int i = 0; i < acCount; i++)
+                    ac.Add(_rng.NextInt(1, floors) + ":" + _rng.NextInt(0, perFloor) + ":" + (_rng.NextChance(0.5f) ? "1" : "-1"));
+                var patches = new List<string>();
+                int patchCount = _rng.NextInt(0, 3);
+                for (int i = 0; i < patchCount; i++)
+                    patches.Add(_rng.NextInt(0, floors) + ":" + _rng.NextInt(0, perFloor) + ":" + (_rng.NextChance(0.5f) ? "1" : "-1"));
+                return new Dictionary<string, string>
+                {
+                    { "windowsPerFloor", perFloor.ToString(CultureInfo.InvariantCulture) },
+                    { "acUnits", string.Join(";", ac) },
+                    { "patchWindows", string.Join(";", patches) },
+                    { "drainpipes", Num(-length / 2f + 1.2f) + ";" + Num(length / 2f - 1.2f) },
+                };
             }
 
             /// <summary>
@@ -701,6 +793,11 @@ namespace LifeFromZero.City.Quarter
                     _placedFloors.Add(arch.Floors);
                     string buildingId = "bld-" + (++_buildingSeq).ToString("D3", CultureInfo.InvariantCulture);
 
+                    // Архитектурный вариант дома: без одинаковых комбинаций у соседей.
+                    BuildingVariant variant = PickVariant(arch.Floors, center,
+                        out string facadeColor, out int balconyOffset, out float wearLevel);
+                    string doorColor = _rng.Pick(DoorColors);
+
                     // Подъезды: вдоль фасада, обращённого внутрь блока.
                     // normal — куда смотрит фасад (адаптеру: дверь, козырёк, номер подъезда).
                     Vec2 normal;
@@ -729,18 +826,29 @@ namespace LifeFromZero.City.Quarter
                             new Vec3(3f, 3f, 1f),
                             Params(("buildingId", buildingId),
                                    ("entranceNumber", (e + 1).ToString(CultureInfo.InvariantCulture)),
-                                   ("normalX", Num(normal.X)), ("normalZ", Num(normal.Z))));
+                                   ("normalX", Num(normal.X)), ("normalZ", Num(normal.Z)),
+                                   ("entranceStyle", variant.EntranceStyle), ("doorColor", doorColor)));
                     }
 
-                    string facadeColor = FacadeColorFor(arch.FacadeStyle);
                     _buildings.Add(new BuildingInfo(buildingId, arch.Id, center, rot, size, arch.Floors,
-                        entrances, arch.FacadeStyle, arch.RoofType, facadeColor, isPlayerHome: false));
+                        entrances, variant.FacadeStyle, variant.RoofType, facadeColor, isPlayerHome: false,
+                        variant.Id, variant.WindowStyle, variant.BalconyType, variant.RoofVariant,
+                        wearLevel, balconyOffset));
+                    var buildingParams = Params(
+                        ("buildingId", buildingId), ("archetype", arch.Id),
+                        ("floors", arch.Floors.ToString(CultureInfo.InvariantCulture)),
+                        ("entrances", entranceCount.ToString(CultureInfo.InvariantCulture)),
+                        ("style", variant.FacadeStyle), ("roof", variant.RoofType),
+                        ("facadeColor", facadeColor),
+                        ("variant", variant.Id), ("roofVariant", variant.RoofVariant),
+                        ("windowStyle", variant.WindowStyle), ("balconyType", variant.BalconyType),
+                        ("balconyOffset", balconyOffset.ToString(CultureInfo.InvariantCulture)),
+                        ("wear", wearLevel.ToString("0.##", CultureInfo.InvariantCulture)),
+                        ("entranceStyle", variant.EntranceStyle), ("doorColor", doorColor));
+                    foreach (KeyValuePair<string, string> kv in FacadeDetailParams(length, arch.Floors))
+                        buildingParams[kv.Key] = kv.Value;
                     AddObject(QuarterObjectTypes.Building, new Vec3(center.X, 0f, center.Z), rot, size,
-                        Params(("buildingId", buildingId), ("archetype", arch.Id),
-                               ("floors", arch.Floors.ToString(CultureInfo.InvariantCulture)),
-                               ("entrances", entranceCount.ToString(CultureInfo.InvariantCulture)),
-                               ("style", arch.FacadeStyle), ("roof", arch.RoofType),
-                               ("facadeColor", facadeColor)));
+                        buildingParams);
                 }
             }
 
@@ -781,7 +889,8 @@ namespace LifeFromZero.City.Quarter
                 AddObject(QuarterObjectTypes.Playground,
                     new Vec3(playgroundRect.Center.X, 0f, playgroundRect.Center.Z), 0f,
                     new Vec3(12f, 0.3f, 10f),
-                    Params(("courtyardId", yardId), ("equipment", "sandbox,slide,swing")));
+                    Params(("courtyardId", yardId), ("equipment", "sandbox,slide,swing"),
+                           ("playgroundVariant", _courtyardSeq.ToString(CultureInfo.InvariantCulture))));
 
                 // Вариант планировки двора (0..2): дворы различаются наполнением и
                 // расположением оборудования, а не только случайными деревьями.
@@ -824,13 +933,26 @@ namespace LifeFromZero.City.Quarter
                     var p = new Vec2(playgroundRect.MinX - 2f + t * (playgroundRect.Width + 4f),
                                      playgroundRect.MinZ - 2f);
                     AddObject(QuarterObjectTypes.Bench, new Vec3(p.X, 0f, p.Z), 0f,
-                        new Vec3(1.8f, 0.6f, 0.6f), Params(("courtyardId", yardId)));
+                        new Vec3(1.8f, 0.6f, 0.6f),
+                        Params(("courtyardId", yardId),
+                               ("benchStyle", _rng.NextChance(0.5f) ? "new" : "old")));
                     if (i % 2 == 0)
                     {
                         AddObject(QuarterObjectTypes.Urn, new Vec3(p.X + 1.3f, 0f, p.Z), 0f,
                             new Vec3(0.45f, 0.7f, 0.45f), Params(("courtyardId", yardId)));
                         urns++;
                     }
+                }
+
+                // Ограждения палисадника вдоль южной стороны двора (не сплошняком — с разрывами у дорожек).
+                int fenceSegments = _rng.NextInt(2, 4);
+                for (int i = 0; i < fenceSegments; i++)
+                {
+                    float fx = yard.MinX + 3f + i * ((yard.Width - 6f) / Math.Max(1, fenceSegments));
+                    if (Math.Abs(fx - driveX) < 3f) continue; // разрыв у дорожки к проезду
+                    AddObject(QuarterObjectTypes.YardFence, new Vec3(fx, 0f, yard.MinZ + 0.8f), 0f,
+                        new Vec3(4.5f, 0.55f, 0.08f),
+                        Params(("courtyardId", yardId), ("fenceStyle", _rng.NextChance(0.5f) ? "wood" : "metal")));
                 }
 
                 // Мусорные контейнеры у проезда, рядом с парковкой.
@@ -1150,6 +1272,24 @@ namespace LifeFromZero.City.Quarter
             private void BuildStreetFurniture()
             {
                 float s = _o.Size;
+                // Асфальтовые заплатки: умеренная обжитость, не на перекрёстках.
+                foreach (float line in _lines)
+                {
+                    for (int i = 0; i < 4; i++)
+                    {
+                        float t = _rng.NextRange(8f, s - 8f);
+                        bool nearCross = false;
+                        foreach (float l in _lines)
+                            if (Math.Abs(t - l) < CorridorHalf + 4f) nearCross = true;
+                        if (nearCross) continue;
+                        float lane = _rng.NextRange(-_o.RoadWidth / 2f + 1f, _o.RoadWidth / 2f - 1f);
+                        bool vertical = _rng.NextChance(0.5f);
+                        AddObject(QuarterObjectTypes.RoadPatch,
+                            vertical ? new Vec3(line + lane, 0f, t) : new Vec3(t, 0f, line + lane),
+                            vertical ? 90f : 0f,
+                            new Vec3(_rng.NextRange(2f, 4.5f), 0.03f, _rng.NextRange(1.5f, 3f)));
+                    }
+                }
                 // Уличные фонари: вдоль улиц с шагом, стороны чередуются, у перекрёстков — пропуск.
                 foreach (float line in _lines)
                 {
