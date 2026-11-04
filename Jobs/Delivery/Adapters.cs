@@ -34,6 +34,15 @@ namespace LifeFromZero.Jobs.Delivery
         bool TryCredit(long rubles);
     }
 
+    /// <summary>Durable wallet must atomically record operation ID, amount and credit.
+    /// Repeating the same ID and amount returns true without crediting again; a conflicting
+    /// amount returns false. IDs must be scoped to a single save lineage by the adapter.
+    /// An exception may mean an unknown outcome; retry with the identical ID.</summary>
+    public interface IIdempotentPayoutAdapter : IPayoutAdapter
+    {
+        bool TryCredit(string operationId, long rubles);
+    }
+
     /// <summary>
     /// Текущее местоположение игрока. Реализуется адаптером поверх существующей системы
     /// перемещения (какая бы она ни была).

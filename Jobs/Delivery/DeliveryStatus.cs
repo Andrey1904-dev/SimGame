@@ -66,7 +66,7 @@ namespace LifeFromZero.Jobs.Delivery
         /// <summary>Состояние заказа после операции (или до неё, если операция отклонена).</summary>
         public DeliveryStatus Status { get; }
 
-        /// <summary>Сумма, фактически начисленная этой операцией. 0, если выплаты не было.</summary>
+        /// <summary>Подтверждённая сумма выплаты; при идемпотентном повторе может быть начислена ранее. 0 при отказе.</summary>
         public long PaidRubles { get; }
 
         /// <summary>Успешна ли операция.</summary>
