@@ -43,6 +43,19 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
 
         private readonly Dictionary<string, Material> _materials = new Dictionary<string, Material>();
         private readonly Dictionary<string, GameObject> _prefabs = new Dictionary<string, GameObject>();
+        // Меши деталей зданий создаются кодом и не уничтожаются вместе с
+        // GameObject — держим список и освобождаем в OnDestroy (аудит №026).
+        private readonly List<Mesh> _createdMeshes = new List<Mesh>();
+
+        private void OnDestroy()
+        {
+            foreach (Mesh mesh in _createdMeshes)
+                if (mesh != null) Destroy(mesh);
+            _createdMeshes.Clear();
+            foreach (Material material in _materials.Values)
+                if (material != null) Destroy(material);
+            _materials.Clear();
+        }
 
         private void Start()
         {
@@ -227,6 +240,10 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         }
 
         private static bool NeedsCollider(string typeId) =>
+            // Дороги/проезды/тротуары — земля, по которой ходит игрок: без их
+            // коллайдеров персонаж проваливался бы сквозь покрытие (аудит №026).
+            typeId == QuarterObjectTypes.Road || typeId == QuarterObjectTypes.Driveway ||
+            typeId == QuarterObjectTypes.Intersection || typeId == QuarterObjectTypes.Sidewalk ||
             typeId == QuarterObjectTypes.Building || typeId == QuarterObjectTypes.Tree ||
             typeId == QuarterObjectTypes.StreetLamp || typeId == QuarterObjectTypes.YardLamp ||
             typeId == QuarterObjectTypes.Bench || typeId == QuarterObjectTypes.Playground ||
@@ -474,6 +491,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         {
             Mesh mesh = builder.Build();
             if (mesh == null) return;
+            _createdMeshes.Add(mesh);
             var go = new GameObject(name + "_" + building.Id);
             go.transform.SetParent(root, false);
             go.transform.localPosition = new Vector3(building.Position.X, building.Position.Y, building.Position.Z);
@@ -532,9 +550,12 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 var r2 = new Vector3(baseCenter.x + x, y1, baseCenter.z);
                 AddQuad(a, b, r2, r1); // южный скат
                 AddQuad(c, d, r1, r2); // северный скат
-                AddQuad(a, r1, d, a);  // западный фронтон (треугольник: продублированная вершина допустима)
-                AddQuad(b, c, r2, b);  // восточный фронтон
-                AddQuad(d, c, b, a);   // низ
+                // Фронтоны — треугольники; раньше оба AddQuad были вырождены
+                // (p3 == p0 → нулевая нормаль → пропуск), и крыши были открыты
+                // с торцов (аудит ТЗ №026). Порядок вершин даёт внешнюю нормаль.
+                AddQuad(a, d, r1, r1); // западный фронтон (нормаль -X)
+                AddQuad(b, r2, c, c);  // восточный фронтон (нормаль +X)
+                AddQuad(a, b, c, d);   // низ (нормаль вниз)
             }
 
             private void AddQuad(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3)
@@ -599,6 +620,10 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         /// <summary>Материал объекта: у жилых домов — по цвету фасада из данных (кэш по цвету).</summary>
         private Material MaterialForObject(PlacedObject obj)
         {
+            // Стеклянный фасад ЖК проверяем ДО цвета: у элитных башен тоже есть
+            // facadeColor, и раньше ветка glass была недостижима (аудит ТЗ №026).
+            if (obj.TypeId == QuarterObjectTypes.Building && obj.Param("style") == "glass")
+                return MaterialFor("detail.glass"); // стеклянный фасад элитной высотки целиком
             if (obj.TypeId == QuarterObjectTypes.Building)
             {
                 string hex = obj.Param("facadeColor");
@@ -613,8 +638,6 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                     return cachedFacade;
                 }
             }
-            if (obj.TypeId == QuarterObjectTypes.Building && obj.Param("style") == "glass")
-                return MaterialFor("detail.glass"); // стеклянный фасад элитной высотки целиком
             if (obj.TypeId == QuarterObjectTypes.PrivateFence)
                 return MaterialFor(obj.Param("fenceStyle") == "wood" ? "fence.wood" : "fence.metal");
             if (obj.TypeId == QuarterObjectTypes.Tree)

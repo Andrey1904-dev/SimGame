@@ -13,6 +13,7 @@ namespace LifeFromZero.City.Quarter.Tests
             suite.AddRange(HousingTests.CreateSuite());
             suite.AddRange(ArchitectureVarietyTests.CreateSuite());
             suite.AddRange(FinalCityTests.CreateSuite());
+            suite.AddRange(AuditTests.CreateSuite());
             return suite;
         }
     }

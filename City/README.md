@@ -41,7 +41,7 @@
 | `Quarter/City.Quarter.asmdef` | Сборка `LifeFromZero.City.Quarter`, `noEngineReferences: true` |
 | `UnityAdapter/QuarterUnityAdapter.cs` | Единственный файл с UnityEngine: строит GameObject/примитивы/материалы/коллайдеры по плану; префабы по TypeId — через `prefabOverrides` |
 | `UnityAdapter/City.Quarter.UnityAdapter.asmdef` | Сборка адаптера, ссылается на ядро |
-| `Tests/` | 53 теста (MiniTestRunner + NUnit-обёртка для Unity), `Console.csproj` для прогона вне Unity; ПВЗ — `PickupPointTests.cs`, развитие города — `CityExpansionTests.cs`, жильё — `HousingTests.cs`, разнообразие — `ArchitectureVarietyTests.cs` |
+| `Tests/` | 63 теста (MiniTestRunner + NUnit-обёртка для Unity), `Console.csproj` для прогона вне Unity; ПВЗ — `PickupPointTests.cs`, развитие города — `CityExpansionTests.cs`, жильё — `HousingTests.cs`, разнообразие — `ArchitectureVarietyTests.cs`, финал — `FinalCityTests.cs`, аудит — `AuditTests.cs` |
 
 
 ## Развитие города (ТЗ №024)
@@ -82,11 +82,13 @@
 и реестр `QuarterPlan.Properties` (`RealEstateProperty`: уникальный Id,
 тип, Id здания, позиция, статус). Для seed=1904: `player.home` — стартовая
 кв. №67 в пятиэтажке `bld-001` (PlayerStartHome); `property.apartment9.01` —
-будущая квартира на реальной девятиэтажке `bld-003` (FuturePurchasable,
+будущая квартира на реальной девятиэтажке квартала (FuturePurchasable,
 архетип `building.panel9` добавлен как обычный жилой дом);
 `property.elite.highrise.future` и `property.private.house.future` —
-только плановые записи (PlannedNotBuilt): 30+ ЖК и частный дом в квартале
-250×250 **не строятся**. Покупка, переезды, цены и интерьеры не реализованы;
+на момент этого уточнения только плановые записи (PlannedNotBuilt);
+**с ТЗ №025 ЖК и частные дома строятся** и реестр привязан к зданиям
+(`property.elite.01/02`, `property.private.01/02`) — см. раздел
+«Финальная застройка». Покупка, переезды, цены и интерьеры не реализованы;
 новые типы жилья добавляются записью в каталог.
 
 ### Визуальное разнообразие (дополнение к ТЗ №024)
@@ -172,7 +174,7 @@ dotnet run --project City/Tests/Console.csproj
 ```
 
 В этой сессии прогон выполнен эквивалентно: автономный модуль + тесты
-скомпилированы Roslyn (C# 8) и запущены на .NET Core 3.1 — **58/58 PASS**
+скомпилированы Roslyn (C# 8) и запущены на .NET Core 3.1 — **63/63 PASS**
 (дороги и связность графа, переходы/разметка, дома вне проезжей части и
 без пересечений, подъезды, комплектность дворов, проезды, фонари,
 повторяемость по seed на seed=42 и серия seed 1..10, расширяемость;

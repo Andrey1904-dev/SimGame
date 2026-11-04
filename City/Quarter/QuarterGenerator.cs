@@ -806,16 +806,44 @@ namespace LifeFromZero.City.Quarter
                         new Vec3(10f, 4.2f, 3.4f), Params(("buildingId", bid)));
                     AddObject(QuarterObjectTypes.EliteCanopy, new Vec3(lobbyCenter.X, 4.2f, lobbyCenter.Z), 0f,
                         new Vec3(12f, 0.25f, 4.6f), Params(("buildingId", bid)));
-                    // Парковка сбоку от башни.
-                    Vec2 parkingCenter = center + new Vec2(arch.LengthVariants[0] / 2f + 7f, 0f);
-                    if (parkingCenter.X + 6f > block.MaxX - 2f) parkingCenter = center - new Vec2(arch.LengthVariants[0] / 2f + 7f, 0f);
-                    AddObject(QuarterObjectTypes.ParkingLot, new Vec3(parkingCenter.X, 0f, parkingCenter.Z), 0f,
-                        new Vec3(11f, 0.09f, 9f), Params(("buildingId", bid)));
-                    for (int sIdx = 0; sIdx < 4; sIdx++)
+                    // Парковка: первый кандидат, целиком помещающийся в блок и не
+                    // пересекающийся с башней и лобби. Сбоку от длинной башни в
+                    // угловом блоке места может не быть — тогда парковка уходит
+                    // на торцевую сторону (раньше в таких случаях машино-места
+                    // уезжали за границу квартала, аудит ТЗ №026, seed 3/10/777).
+                    float halfLen = arch.LengthVariants[0] / 2f;
+                    var lobbyRect = Rect2.FromCenterSize(lobbyCenter, 12f, 4.6f);
+                    var parkingCandidates = new[]
                     {
-                        AddObject(QuarterObjectTypes.ParkingStall,
-                            new Vec3(parkingCenter.X - 3.75f + sIdx * 2.5f, 0f, parkingCenter.Z), 0f,
-                            new Vec3(2.5f, 0.12f, 5f), Params(("buildingId", bid)));
+                        center + new Vec2(halfLen + 7f, 0f),
+                        center - new Vec2(halfLen + 7f, 0f),
+                        center + new Vec2(-halfLen + 5.5f, 0f) + normal * (arch.Depth / 2f + 6f),
+                        center + new Vec2(halfLen - 5.5f, 0f) + normal * (arch.Depth / 2f + 6f),
+                        center + new Vec2(-halfLen + 5.5f, 0f) - normal * (arch.Depth / 2f + 6f),
+                        center + new Vec2(halfLen - 5.5f, 0f) - normal * (arch.Depth / 2f + 6f),
+                    };
+                    Vec2 parkingCenter = parkingCandidates[0];
+                    bool parkingPlaced = false;
+                    foreach (Vec2 candidate in parkingCandidates)
+                    {
+                        var lotRect = Rect2.FromCenterSize(candidate, 11f, 9f);
+                        if (lotRect.MinX < block.MinX + 1f || lotRect.MaxX > block.MaxX - 1f ||
+                            lotRect.MinZ < block.MinZ + 1f || lotRect.MaxZ > block.MaxZ - 1f) continue;
+                        if (lotRect.Overlaps(info.Footprint.Expanded(1f)) || lotRect.Overlaps(lobbyRect)) continue;
+                        parkingCenter = candidate;
+                        parkingPlaced = true;
+                        break;
+                    }
+                    if (parkingPlaced)
+                    {
+                        AddObject(QuarterObjectTypes.ParkingLot, new Vec3(parkingCenter.X, 0f, parkingCenter.Z), 0f,
+                            new Vec3(11f, 0.09f, 9f), Params(("buildingId", bid)));
+                        for (int sIdx = 0; sIdx < 4; sIdx++)
+                        {
+                            AddObject(QuarterObjectTypes.ParkingStall,
+                                new Vec3(parkingCenter.X - 3.75f + sIdx * 2.5f, 0f, parkingCenter.Z), 0f,
+                                new Vec3(2.5f, 0.12f, 5f), Params(("buildingId", bid)));
+                        }
                     }
                     // Декоративное освещение территории.
                     foreach (Vec2 corner in new[]
@@ -840,6 +868,10 @@ namespace LifeFromZero.City.Quarter
                     if (k == 1)
                     {
                         Vec2 restCenter = center - normal * (arch.Depth / 2f + 4f);
+                        // Если парковка заняла заднюю сторону, зону отдыха сдвигаем
+                        // вдоль фасада, чтобы лавочки не стояли на машино-местах.
+                        if (parkingPlaced && (parkingCenter.Z - center.Z) * normal.Z < -1f)
+                            restCenter = new Vec2(center.X + (parkingCenter.X < center.X ? 9f : -9f), restCenter.Z);
                         AddObject(QuarterObjectTypes.Footpath, new Vec3(restCenter.X, 0f, restCenter.Z), 0f,
                             new Vec3(14f, 0.06f, 1.8f), Params(("buildingId", bid)));
                         for (int bn = 0; bn < 3; bn++)
@@ -1354,12 +1386,12 @@ namespace LifeFromZero.City.Quarter
             // ---------- реестр недвижимости (жильё игрока) ----------
 
             /// <summary>
-            /// Собирает QuarterPlan.Properties из построенных зданий + плановые
-            /// записи будущих типов жилья. Система не привязана к пятиэтажке:
-            /// стартовая квартира — дом игрока (5 этажей), квартира в девятиэтажке —
-            /// первое 9-этажное здание квартала, элитный ЖК и частный дом —
-            /// только плановые записи без зданий (в этом квартале не строятся).
-            /// Покупки, переездов и цен здесь нет.
+            /// Собирает QuarterPlan.Properties из построенных зданий. Система не
+            /// привязана к пятиэтажке: стартовая квартира — дом игрока (5 этажей),
+            /// квартира в девятиэтажке — первое 9-этажное здание квартала,
+            /// элитные ЖК и частные дома с ТЗ №025 — реальные здания с записями
+            /// FuturePurchasable (плановые записи без зданий остаются фолбэком
+            /// при отключённых опциях). Покупки, переездов и цен здесь нет.
             /// </summary>
             private void BuildRealEstateRegistry()
             {
