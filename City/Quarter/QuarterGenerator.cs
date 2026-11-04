@@ -63,6 +63,12 @@ namespace LifeFromZero.City.Quarter
             private int _courtyardSeq;
             private PickupPointInfo _pickup;
             private Rect2? _pickupBlock; // блок с ПВЗ не становится двором, чтобы проезд/парковка не спорили за место
+            private GroceryShopInfo _shop;
+            private Rect2? _shopBlock;
+            private PlayerHomeInfo _playerHome;
+            private BasementInfo _basement;
+            private readonly List<DeliveryPointInfo> _deliveryPoints = new List<DeliveryPointInfo>();
+            private readonly HashSet<int> _placedFloors = new HashSet<int>(); // какие этажности уже стоят (гарантия разнообразия)
 
             private float[] _lines;       // координаты улиц по каждой оси
             private float CorridorHalf => _o.RoadWidth / 2f + _o.SidewalkWidth;
@@ -81,14 +87,20 @@ namespace LifeFromZero.City.Quarter
                 BuildRoadNetwork();
                 if (_o.IncludePickupPoint)
                     PlacePickupPoint();
+                PlaceGroceryShop();
+                if (_o.PlayerHome != null && _o.PlayerHome.Enabled)
+                    PlacePlayerHome();
                 BuildBlocksAndCourtyards();
+                BuildBasement();
+                BuildDeliveryPoints();
                 BuildStreetFurniture();
 
                 var context = new QuarterPlacementContext(_rng, s, _objects, o => _objects.Add(o), IsFree);
                 foreach (IQuarterObjectPlacer placer in _o.CustomPlacers)
                     placer.Place(context);
 
-                return new QuarterPlan(_o.Seed, s, _objects, _roads, _nodes, _buildings, _courtyards, _pickup);
+                return new QuarterPlan(_o.Seed, s, _objects, _roads, _nodes, _buildings, _courtyards,
+                                       _pickup, _playerHome, _shop, _basement, _deliveryPoints);
             }
 
             // ---------- инфраструктура ----------
@@ -256,6 +268,28 @@ namespace LifeFromZero.City.Quarter
                 }
             }
 
+            /// <summary>
+            /// Случайная сторона блока, выходящая на улицу (для ПВЗ и магазина).
+            /// FacesSouth=true: фасад смотрит на южную улицу блока; false — на северную.
+            /// Исключённые блоки (уже занятые ПВЗ/магазином) пропускаются, поэтому
+            /// ПВЗ и магазин гарантированно оказываются в разных блоках.
+            /// </summary>
+            private (Rect2 Block, bool FacesSouth) PickFrontageBlock(params Rect2?[] excluded)
+            {
+                var candidates = new List<(Rect2 Block, bool FacesSouth)>();
+                foreach (Rect2 block in BlockRects())
+                {
+                    bool skip = false;
+                    foreach (Rect2? ex in excluded)
+                        if (ex.HasValue && block.Equals(ex.Value))
+                            skip = true;
+                    if (skip) continue;
+                    if (block.MinZ > 1f) candidates.Add((block, true));
+                    if (block.MaxZ < _o.Size - 1f) candidates.Add((block, false));
+                }
+                return _rng.Pick(candidates);
+            }
+
             // ---------- пункт выдачи заказов (ПВЗ) ----------
 
             /// <summary>
@@ -271,15 +305,8 @@ namespace LifeFromZero.City.Quarter
                 const string pickupId = "pvz-01";
                 const float buildingLength = 12f, buildingDepth = 8f, buildingHeight = 3.2f, plazaDepth = 4f;
 
-                // Кандидаты: стороны блоков, выходящие на улицу (южная — если под блоком
-                // есть улица, северная — если над блоком). Фасад всегда смотрит на улицу.
-                var candidates = new List<(Rect2 Block, bool FacesSouth)>();
-                foreach (Rect2 block in BlockRects())
-                {
-                    if (block.MinZ > 1f) candidates.Add((block, true));
-                    if (block.MaxZ < _o.Size - 1f) candidates.Add((block, false));
-                }
-                (Rect2 blk, bool facesSouth) = _rng.Pick(candidates);
+                // Сторона блока, выходящая на улицу; фасад смотрит на улицу.
+                (Rect2 blk, bool facesSouth) = PickFrontageBlock();
                 _pickupBlock = blk;
 
                 float cx = blk.Center.X + _rng.NextRange(-6f, 6f);
@@ -347,6 +374,211 @@ namespace LifeFromZero.City.Quarter
                     entrance, interaction, plazaRect, buildingRect);
             }
 
+            // ---------- продуктовый магазин ----------
+
+            /// <summary>
+            /// Один продуктовый магазин: одноэтажный, витрины, вывеска «ПРОДУКТЫ»,
+            /// площадка у тротуара, точка shop.grocery. Блок — другой, чем у ПВЗ.
+            /// Экономики/покупок нет — только здание и точка взаимодействия.
+            /// </summary>
+            private void PlaceGroceryShop()
+            {
+                const string shopId = "shop-01";
+                const float length = 14f, depth = 9f, height = 3.4f, plazaDepth = 4f;
+
+                (Rect2 blk, bool facesSouth) = PickFrontageBlock(_pickupBlock);
+                _shopBlock = blk;
+
+                float cx = blk.Center.X + _rng.NextRange(-5f, 5f);
+                float frontZ, centerZ;
+                if (facesSouth) { frontZ = blk.MinZ + plazaDepth; centerZ = frontZ + depth / 2f; }
+                else { frontZ = blk.MaxZ - plazaDepth; centerZ = frontZ - depth / 2f; }
+                float outward = facesSouth ? -1f : 1f;
+                float facadeRot = facesSouth ? 180f : 0f;
+
+                var buildingRect = Rect2.FromCenterSize(new Vec2(cx, centerZ), length, depth);
+                var plazaRect = Rect2.FromCenterSize(new Vec2(cx, frontZ + outward * plazaDepth / 2f), length + 2f, plazaDepth);
+                _solidFootprints.Add(buildingRect);
+                _solidFootprints.Add(plazaRect);
+
+                var entrance = new Vec3(cx, 0f, frontZ + outward * 0.3f);
+                var interaction = new Vec3(cx, 0f, frontZ + outward * 1.6f);
+
+                AddObject(QuarterObjectTypes.ShopBuilding, new Vec3(cx, 0f, centerZ), 0f,
+                    new Vec3(length, height, depth),
+                    Params(("buildingId", shopId), ("floors", "1"), ("roof", "flat"),
+                           ("signText", GroceryShopInfo.SignText),
+                           ("entrance", Num(entrance.X) + "," + Num(entrance.Z)),
+                           ("interactionPoint", Num(interaction.X) + "," + Num(interaction.Z))));
+                AddObject(QuarterObjectTypes.ShopRoof, new Vec3(cx, height, centerZ), 0f,
+                    new Vec3(length + 0.6f, 0.25f, depth + 0.6f), Params(("buildingId", shopId)));
+                AddObject(QuarterObjectTypes.ShopDoor, new Vec3(cx, 0f, frontZ + outward * 0.08f), facadeRot,
+                    new Vec3(1.4f, 2.3f, 0.15f), Params(("buildingId", shopId)));
+                foreach (float offsetX in new[] { -5.2f, -3.2f, 3.2f, 5.2f })
+                {
+                    AddObject(QuarterObjectTypes.ShopWindow,
+                        new Vec3(cx + offsetX, 0.8f, frontZ + outward * 0.06f), facadeRot,
+                        new Vec3(1.8f, 1.4f, 0.1f), Params(("buildingId", shopId)));
+                }
+                AddObject(QuarterObjectTypes.ShopSign, new Vec3(cx, 2.3f, frontZ + outward * 0.15f), facadeRot,
+                    new Vec3(5.5f, 0.8f, 0.18f),
+                    Params(("buildingId", shopId), ("text", GroceryShopInfo.SignText)));
+                AddObject(QuarterObjectTypes.ShopPlaza, new Vec3(plazaRect.Center.X, 0f, plazaRect.Center.Z), 0f,
+                    new Vec3(plazaRect.Width, 0.07f, plazaRect.Height), Params(("buildingId", shopId)));
+                AddObject(QuarterObjectTypes.ShopPoint, interaction, 0f,
+                    new Vec3(0.8f, 0.05f, 0.8f),
+                    Params(("buildingId", shopId), ("purpose", "shop.grocery"),
+                           ("interactionRadius", "1.5")));
+
+                _shop = new GroceryShopInfo(shopId, new Vec2(cx, centerZ), new Vec3(length, height, depth),
+                    entrance, interaction, plazaRect, buildingRect);
+            }
+
+            // ---------- дом игрока ----------
+
+            /// <summary>
+            /// Дом игрока (player.home, кв. №67 — только данные): пятиэтажка,
+            /// место резервируется до обычной застройки, поэтому второй дом
+            /// поверх не встанет (обычные дома проверяют _solidFootprints).
+            /// Позицию/поворот можно задать извне через Options.PlayerHome;
+            /// внешняя позиция валидируется: внутри квартала, не на дороге,
+            /// не поверх ПВЗ/магазина — иначе генерация падает с понятной ошибкой.
+            /// </summary>
+            private void PlacePlayerHome()
+            {
+                BuildingArchetype arch = null;
+                foreach (BuildingArchetype a in _o.Archetypes)
+                    if (a.Floors == 5) { arch = a; break; }
+                arch = arch ?? _o.Archetypes[0];
+
+                float length = arch.LengthVariants[arch.LengthVariants.Count / 2];
+                var size = new Vec3(length, arch.Floors * arch.FloorHeight, arch.Depth);
+                Vec2 center;
+                float rot;
+                Vec2 facadeNormal; // куда смотрит фасад с подъездами (во двор)
+
+                if (_o.PlayerHome.Position.HasValue)
+                {
+                    center = _o.PlayerHome.Position.Value;
+                    rot = _o.PlayerHome.RotationY;
+                    if (Math.Abs(rot) > 0.01f && Math.Abs(Math.Abs(rot) - 90f) > 0.01f)
+                        throw new ArgumentException("PlayerHome.RotationY: допустимы только 0 или 90 градусов.");
+                    bool alongX = Math.Abs(rot) < 0.01f;
+                    facadeNormal = alongX ? new Vec2(0f, 1f) : new Vec2(1f, 0f);
+                    var probe = new PlacedObject("probe", QuarterObjectTypes.Building,
+                        new Vec3(center.X, 0f, center.Z), rot, size, null);
+                    Rect2 fp = probe.Footprint;
+                    if (fp.MinX < 0f || fp.MinZ < 0f || fp.MaxX > _o.Size || fp.MaxZ > _o.Size)
+                        throw new ArgumentException("PlayerHome.Position: дом выходит за границу квартала.");
+                    foreach (RoadSegment road in _roads)
+                        if (road.Kind == RoadKind.Street && fp.Overlaps(road.Footprint.Expanded(CorridorHalf - road.Width / 2f + 0.1f)))
+                            throw new ArgumentException("PlayerHome.Position: дом попадает на дорогу/тротуар.");
+                    if (!IsFree(fp, 1f))
+                        throw new ArgumentException("PlayerHome.Position: место занято (ПВЗ/магазин/другой объект).");
+                }
+                else
+                {
+                    // Автовыбор: южный край случайного внутреннего блока, фасад — во двор (на север).
+                    var blocks = new List<Rect2>();
+                    foreach (Rect2 b in BlockRects())
+                        if (b.MinX > 1f && b.MinZ > 1f && b.MaxX < _o.Size - 1f && b.MaxZ < _o.Size - 1f &&
+                            !(_pickupBlock.HasValue && b.Equals(_pickupBlock.Value)) &&
+                            !(_shopBlock.HasValue && b.Equals(_shopBlock.Value)))
+                            blocks.Add(b);
+                    Rect2 blk = _rng.Pick(blocks);
+                    center = new Vec2(blk.Center.X, blk.MinZ + 1.5f + arch.Depth / 2f);
+                    rot = 0f;
+                    facadeNormal = new Vec2(0f, 1f);
+                }
+
+                var footprintProbe = new PlacedObject("probe", QuarterObjectTypes.Building,
+                    new Vec3(center.X, 0f, center.Z), rot, size, null);
+                Rect2 footprint = footprintProbe.Footprint;
+                _solidFootprints.Add(footprint);
+                _placedFloors.Add(arch.Floors);
+                string buildingId = "bld-" + (++_buildingSeq).ToString("D3", CultureInfo.InvariantCulture);
+
+                int entranceCount = Math.Max(1, (int)Math.Round(length / arch.EntranceSpacing));
+                var entrances = new List<Vec2>();
+                float halfDepth = arch.Depth / 2f + 0.4f;
+                for (int e = 0; e < entranceCount; e++)
+                {
+                    float along = length * (e + 1) / (entranceCount + 1) - length / 2f;
+                    Vec2 alongVec = Math.Abs(rot) < 0.01f ? new Vec2(along, 0f) : new Vec2(0f, along);
+                    Vec2 p = center + alongVec + facadeNormal * halfDepth;
+                    entrances.Add(p);
+                    AddObject(QuarterObjectTypes.Entrance, new Vec3(p.X, 0f, p.Z), rot,
+                        new Vec3(3f, 3f, 1f),
+                        Params(("buildingId", buildingId),
+                               ("entranceNumber", (e + 1).ToString(CultureInfo.InvariantCulture)),
+                               ("normalX", Num(facadeNormal.X)), ("normalZ", Num(facadeNormal.Z))));
+                }
+
+                string color = FacadeColorFor(arch.FacadeStyle);
+                _buildings.Add(new BuildingInfo(buildingId, arch.Id, center, rot, size, arch.Floors,
+                    entrances, arch.FacadeStyle, arch.RoofType, color, isPlayerHome: true));
+                AddObject(QuarterObjectTypes.Building, new Vec3(center.X, 0f, center.Z), rot, size,
+                    Params(("buildingId", buildingId), ("archetype", arch.Id),
+                           ("floors", arch.Floors.ToString(CultureInfo.InvariantCulture)),
+                           ("entrances", entranceCount.ToString(CultureInfo.InvariantCulture)),
+                           ("style", arch.FacadeStyle), ("roof", arch.RoofType),
+                           ("facadeColor", color),
+                           ("specialId", PlayerHomeInfo.SpecialId),
+                           ("apartment", PlayerHomeInfo.ApartmentNumber.ToString(CultureInfo.InvariantCulture))));
+
+                Vec2 doorGround = entrances[0];
+                var door = new Vec3(doorGround.X, 0f, doorGround.Z);
+                var exit = new Vec3(doorGround.X + facadeNormal.X * 2f, 0f, doorGround.Z + facadeNormal.Z * 2f);
+                AddObject(QuarterObjectTypes.PlayerHomeDoor, door, rot, new Vec3(1.2f, 2.2f, 0.2f),
+                    Params(("buildingId", buildingId), ("specialId", PlayerHomeInfo.SpecialId)));
+                AddObject(QuarterObjectTypes.PlayerHomeExit, exit, rot, new Vec3(0.8f, 0.05f, 0.8f),
+                    Params(("buildingId", buildingId), ("specialId", PlayerHomeInfo.SpecialId),
+                           ("purpose", "player.home.exit")));
+                AddObject(QuarterObjectTypes.PlayerHomeMarker, new Vec3(center.X, 0f, center.Z), rot,
+                    new Vec3(1f, 0.05f, 1f),
+                    Params(("buildingId", buildingId), ("specialId", PlayerHomeInfo.SpecialId),
+                           ("apartment", PlayerHomeInfo.ApartmentNumber.ToString(CultureInfo.InvariantCulture))));
+
+                _playerHome = new PlayerHomeInfo(buildingId, center, rot, door, exit);
+            }
+
+            /// <summary>Цвет фасада по стилю: палитра на стиль, выбор — seed-ом (детерминированно).</summary>
+            private string FacadeColorFor(string style)
+            {
+                string[] palette;
+                switch (style)
+                {
+                    case "brick": palette = new[] { "#A55E41", "#C7B299", "#B98A5F", "#9C6642" }; break;
+                    case "modern": palette = new[] { "#9FB4C7", "#D8DDE2", "#8FA3B0", "#B9C8D4" }; break;
+                    default: palette = new[] { "#C8B8A2", "#B7C0C4", "#D6C9B0", "#C4A484" }; break; // panel
+                }
+                return _rng.Pick(palette);
+            }
+
+            /// <summary>
+            /// Выбор архетипа дома: сначала гарантируем присутствие каждой этажности
+            /// (3 и 10 этажей из списка), дальше — взвешенно, пятиэтажки преобладают.
+            /// </summary>
+            private BuildingArchetype PickArchetype()
+            {
+                foreach (int need in new[] { 3, 10 })
+                {
+                    if (_placedFloors.Contains(need)) continue;
+                    foreach (BuildingArchetype a in _o.Archetypes)
+                        if (a.Floors == need) return a;
+                }
+                int totalWeight = 0;
+                foreach (BuildingArchetype a in _o.Archetypes)
+                    totalWeight += a.Floors == 5 ? 62 : a.Floors == 3 ? 20 : 18;
+                int roll = _rng.NextInt(0, totalWeight);
+                foreach (BuildingArchetype a in _o.Archetypes)
+                {
+                    roll -= a.Floors == 5 ? 62 : a.Floors == 3 ? 20 : 18;
+                    if (roll < 0) return a;
+                }
+                return _o.Archetypes[0];
+            }
+
             // ---------- блоки, дома, дворы ----------
 
             private List<Rect2> BlockRects()
@@ -368,7 +600,9 @@ namespace LifeFromZero.City.Quarter
                 var candidates = new List<Rect2>();
                 foreach (Rect2 b in blocks)
                     if (b.MinX > 1f && b.MinZ > 1f && b.MaxX < _o.Size - 1f && b.MaxZ < _o.Size - 1f &&
-                        !(_pickupBlock.HasValue && b.Equals(_pickupBlock.Value)))
+                        !(_pickupBlock.HasValue && b.Equals(_pickupBlock.Value)) &&
+                        !(_shopBlock.HasValue && b.Equals(_shopBlock.Value)) &&
+                        !(_playerHome != null && b.Contains(_playerHome.Center)))
                         candidates.Add(b);
                 // Детерминированно перемешиваем кандидатов seed-ом и берём нужное число дворов.
                 for (int i = candidates.Count - 1; i > 0; i--)
@@ -420,7 +654,7 @@ namespace LifeFromZero.City.Quarter
 
                 while (true)
                 {
-                    BuildingArchetype arch = _rng.Pick(_o.Archetypes);
+                    BuildingArchetype arch = PickArchetype();
                     // Берём случайную длину из тех, что ещё помещаются на стороне.
                     float length = -1f;
                     var variants = new List<float>(arch.LengthVariants);
@@ -455,9 +689,19 @@ namespace LifeFromZero.City.Quarter
                     if (!IsFree(footprint, 2.5f)) continue;
 
                     _solidFootprints.Add(footprint);
+                    _placedFloors.Add(arch.Floors);
                     string buildingId = "bld-" + (++_buildingSeq).ToString("D3", CultureInfo.InvariantCulture);
 
                     // Подъезды: вдоль фасада, обращённого внутрь блока.
+                    // normal — куда смотрит фасад (адаптеру: дверь, козырёк, номер подъезда).
+                    Vec2 normal;
+                    switch (edge)
+                    {
+                        case Edge.South: normal = new Vec2(0f, 1f); break;
+                        case Edge.North: normal = new Vec2(0f, -1f); break;
+                        case Edge.West: normal = new Vec2(1f, 0f); break;
+                        default: normal = new Vec2(-1f, 0f); break;
+                    }
                     int entranceCount = Math.Max(1, (int)Math.Round(length / arch.EntranceSpacing));
                     var entrances = new List<Vec2>();
                     for (int e = 0; e < entranceCount; e++)
@@ -473,14 +717,21 @@ namespace LifeFromZero.City.Quarter
                         }
                         entrances.Add(p);
                         AddObject(QuarterObjectTypes.Entrance, new Vec3(p.X, 0f, p.Z), rot,
-                            new Vec3(3f, 3f, 1f), Params(("buildingId", buildingId)));
+                            new Vec3(3f, 3f, 1f),
+                            Params(("buildingId", buildingId),
+                                   ("entranceNumber", (e + 1).ToString(CultureInfo.InvariantCulture)),
+                                   ("normalX", Num(normal.X)), ("normalZ", Num(normal.Z))));
                     }
 
-                    _buildings.Add(new BuildingInfo(buildingId, arch.Id, center, rot, size, arch.Floors, entrances));
+                    string facadeColor = FacadeColorFor(arch.FacadeStyle);
+                    _buildings.Add(new BuildingInfo(buildingId, arch.Id, center, rot, size, arch.Floors,
+                        entrances, arch.FacadeStyle, arch.RoofType, facadeColor, isPlayerHome: false));
                     AddObject(QuarterObjectTypes.Building, new Vec3(center.X, 0f, center.Z), rot, size,
                         Params(("buildingId", buildingId), ("archetype", arch.Id),
                                ("floors", arch.Floors.ToString(CultureInfo.InvariantCulture)),
-                               ("entrances", entranceCount.ToString(CultureInfo.InvariantCulture))));
+                               ("entrances", entranceCount.ToString(CultureInfo.InvariantCulture)),
+                               ("style", arch.FacadeStyle), ("roof", arch.RoofType),
+                               ("facadeColor", facadeColor)));
                 }
             }
 
@@ -523,8 +774,41 @@ namespace LifeFromZero.City.Quarter
                     new Vec3(12f, 0.3f, 10f),
                     Params(("courtyardId", yardId), ("equipment", "sandbox,slide,swing")));
 
-                // Лавочки вокруг площадки.
+                // Вариант планировки двора (0..2): дворы различаются наполнением и
+                // расположением оборудования, а не только случайными деревьями.
+                int variant = _rng.NextInt(0, 3);
+
+                // Оборудование детской площадки: качели и песочницы настоящими объектами.
+                int swings = variant == 1 ? 1 : 2;
+                for (int i = 0; i < swings; i++)
+                {
+                    var p = new Vec2(playgroundRect.MinX + 2.5f + i * 3.5f, playgroundRect.MaxZ - 2f);
+                    AddObject(QuarterObjectTypes.Swing, new Vec3(p.X, 0f, p.Z), 0f,
+                        new Vec3(2.4f, 2.2f, 0.8f), Params(("courtyardId", yardId), ("seats", "2")));
+                }
+                int sandboxes = variant == 2 ? 2 : 1;
+                for (int i = 0; i < sandboxes; i++)
+                {
+                    var p = new Vec2(playgroundRect.MaxX - 2.5f - i * 3.5f, playgroundRect.MinZ + 2f);
+                    AddObject(QuarterObjectTypes.Sandbox, new Vec3(p.X, 0f, p.Z), 0f,
+                        new Vec3(2.2f, 0.4f, 2.2f), Params(("courtyardId", yardId)));
+                }
+
+                // Пешеходные дорожки: от проезда/парковки к площадке и поперёк двора.
+                AddObject(QuarterObjectTypes.Footpath,
+                    new Vec3(driveX, 0f, (parkingRect.MaxZ + playgroundRect.MinZ) / 2f), 90f,
+                    new Vec3(playgroundRect.MinZ - parkingRect.MaxZ, 0.06f, 1.6f),
+                    Params(("courtyardId", yardId)));
+                if (variant != 1)
+                {
+                    AddObject(QuarterObjectTypes.Footpath,
+                        new Vec3(yard.Center.X, 0f, playgroundRect.MinZ - 3.5f), 0f,
+                        new Vec3(yard.Width - 4f, 0.06f, 1.6f), Params(("courtyardId", yardId)));
+                }
+
+                // Лавочки вокруг площадки + урны рядом с частью лавочек.
                 int benches = _rng.NextInt(4, 7);
+                int urns = 0;
                 for (int i = 0; i < benches; i++)
                 {
                     float t = benches == 1 ? 0f : i / (float)(benches - 1);
@@ -532,6 +816,22 @@ namespace LifeFromZero.City.Quarter
                                      playgroundRect.MinZ - 2f);
                     AddObject(QuarterObjectTypes.Bench, new Vec3(p.X, 0f, p.Z), 0f,
                         new Vec3(1.8f, 0.6f, 0.6f), Params(("courtyardId", yardId)));
+                    if (i % 2 == 0)
+                    {
+                        AddObject(QuarterObjectTypes.Urn, new Vec3(p.X + 1.3f, 0f, p.Z), 0f,
+                            new Vec3(0.45f, 0.7f, 0.45f), Params(("courtyardId", yardId)));
+                        urns++;
+                    }
+                }
+
+                // Мусорные контейнеры у проезда, рядом с парковкой.
+                int trashContainers = variant == 0 ? 3 : 2;
+                for (int i = 0; i < trashContainers; i++)
+                {
+                    var p = new Vec2(parkingRect.MaxX + 2f, parkingRect.MinZ + 1.5f + i * 2.2f);
+                    if (p.X > yard.MaxX - 1f) p = new Vec2(parkingRect.MinX - 2f, p.Z);
+                    AddObject(QuarterObjectTypes.TrashContainer, new Vec3(p.X, 0f, p.Z), 0f,
+                        new Vec3(1.9f, 1.2f, 1.1f), Params(("courtyardId", yardId)));
                 }
 
                 // Деревья двора: случайно, но не на площадке/парковке/домах.
@@ -557,8 +857,25 @@ namespace LifeFromZero.City.Quarter
                         new Vec3(0.25f, 4.5f, 0.25f), Params(("courtyardId", yardId), ("height", "4.5")));
                 }
 
+                // Кусты вдоль дорожек и у площадки.
+                int bushesWanted = _rng.NextInt(4, 9);
+                int bushesPlaced = 0;
+                attempts = 0;
+                while (bushesPlaced < bushesWanted && attempts++ < 200)
+                {
+                    var p = new Vec2(_rng.NextRange(yard.MinX + 1f, yard.MaxX - 1f),
+                                     _rng.NextRange(yard.MinZ + 1f, yard.MaxZ - 1f));
+                    if (!IsFree(Rect2.FromCenterSize(p, 0.9f, 0.9f), 0.8f)) continue;
+                    AddObject(QuarterObjectTypes.Bush, new Vec3(p.X, 0f, p.Z), _rng.NextRange(0f, 360f),
+                        new Vec3(_rng.NextRange(0.9f, 1.5f), 0.9f, _rng.NextRange(0.9f, 1.5f)),
+                        Params(("courtyardId", yardId)));
+                    bushesPlaced++;
+                }
+
                 _courtyards.Add(new CourtyardInfo(yardId, yard, parkingRect.Center,
-                    benches, treesPlaced, stalls, hasPlayground: true));
+                    benches, treesPlaced, stalls, hasPlayground: true,
+                    swings: swings, sandboxes: sandboxes, urns: urns,
+                    trashContainers: trashContainers, bushes: bushesPlaced, hasFootpath: true));
             }
 
             private void PlantBlockGreenery(Rect2 inner)
@@ -584,6 +901,202 @@ namespace LifeFromZero.City.Quarter
                 if (yardId != null) parameters["courtyardId"] = yardId;
                 AddObject(QuarterObjectTypes.Tree, new Vec3(p.X, 0f, p.Z), _rng.NextRange(0f, 360f),
                     new Vec3(crown, 4.5f, crown), parameters);
+            }
+
+            // ---------- точки доставки у подъездов ----------
+
+            /// <summary>
+            /// Точка delivery.dropoff перед каждым жилым подъездом: уникальный Id,
+            /// Id здания, номер подъезда, радиус — в DeliveryPointInfo и в объекте-маркере.
+            /// Точка вынесена от стены: подъезд уже в 0.4 м от фасада, точка — ещё в 1.0 м наружу.
+            /// </summary>
+            private void BuildDeliveryPoints()
+            {
+                int seq = 0;
+                foreach (BuildingInfo b in _buildings)
+                {
+                    for (int i = 0; i < b.Entrances.Count; i++)
+                    {
+                        Vec2 entrance = b.Entrances[i];
+                        Vec2 away = entrance - b.Center;
+                        Vec2 normal = Math.Abs(away.X) > Math.Abs(away.Z)
+                            ? new Vec2(Math.Sign(away.X), 0f)
+                            : new Vec2(0f, Math.Sign(away.Z));
+                        Vec2 p = entrance + normal * 1.0f;
+                        string id = "drop-" + (++seq).ToString("D4", CultureInfo.InvariantCulture);
+                        _deliveryPoints.Add(new DeliveryPointInfo(id, b.Id, i + 1, new Vec3(p.X, 0f, p.Z)));
+                        AddObject(QuarterObjectTypes.DeliveryDropoff, new Vec3(p.X, 0f, p.Z), 0f,
+                            new Vec3(0.7f, 0.05f, 0.7f),
+                            Params(("pointId", id), ("buildingId", b.Id),
+                                   ("entranceNumber", (i + 1).ToString(CultureInfo.InvariantCulture)),
+                                   ("interactionRadius", Num(DeliveryPointInfo.DefaultInteractionRadius))));
+                    }
+                }
+            }
+
+            // ---------- подвал под трёхэтажкой ----------
+
+            /// <summary>Локальные координаты подвала/лестницы -> мировые (поворот дома 0/90/180/270).</summary>
+            private static Vec2 LocalToWorld(BuildingInfo b, float lx, float lz)
+            {
+                float r = b.RotationY;
+                if (Math.Abs(r) < 0.01f) return new Vec2(b.Center.X + lx, b.Center.Z + lz);
+                if (Math.Abs(Math.Abs(r) - 90f) < 0.01f) return new Vec2(b.Center.X + lz, b.Center.Z - lx);
+                if (Math.Abs(Math.Abs(r) - 180f) < 0.01f) return new Vec2(b.Center.X - lx, b.Center.Z - lz);
+                return new Vec2(b.Center.X - lz, b.Center.Z + lx);
+            }
+
+            /// <summary>
+            /// Подвал под первой трёхэтажкой квартала. Снаружи: площадка, бетонная
+            /// лестница вниз с задней стороны дома, ржавая железная дверь
+            /// (basement.door, начальное состояние Locked) и тусклый фонарь над ней.
+            /// Внутри: общий бетонный пол/потолок, коридор, две комнаты и секретная
+            /// комната за второй дверью в конце коридора. Грунта/перекрытий поперёк
+            /// прохода генератор не создаёт: единственный потолок — плита над всем
+            /// подвалом на высоте 2.45 м от пола подвала, лестничный проём — снаружи здания.
+            /// </summary>
+            private void BuildBasement()
+            {
+                // Выбираем трёхэтажку, у которой лестница с задней стороны помещается
+                // в квартал и не ложится на проезжую часть (у краевых домов задней
+                // стороной к границе квартала места может не хватить — их пропускаем).
+                BuildingInfo home = null;
+                Vec2 rear = new Vec2(0f, -1f);
+                foreach (BuildingInfo b in _buildings)
+                {
+                    if (b.Floors != 3) continue;
+                    Vec2 inN = b.Entrances[0] - b.Center;
+                    Vec2 r = Math.Abs(inN.X) > Math.Abs(inN.Z)
+                        ? new Vec2(-Math.Sign(inN.X), 0f)
+                        : new Vec2(0f, -Math.Sign(inN.Z));
+                    Vec2 top = b.Center + r * (b.Size.Z / 2f + 3.4f);
+                    if (top.X < 1f || top.Z < 1f || top.X > _o.Size - 1f || top.Z > _o.Size - 1f) continue;
+                    Vec2 mid = b.Center + r * (b.Size.Z / 2f + 1.7f);
+                    var stairRect = Rect2.FromCenterSize(mid,
+                        Math.Abs(r.Z) > 0.5f ? 2.4f : 3.6f, Math.Abs(r.Z) > 0.5f ? 3.6f : 2.4f);
+                    bool onRoad = false;
+                    foreach (RoadSegment road in _roads)
+                        if (road.Kind == RoadKind.Street && stairRect.Overlaps(road.Footprint))
+                            onRoad = true;
+                    if (onRoad) continue;
+                    home = b;
+                    rear = r;
+                    break;
+                }
+                if (home == null) return; // нет подходящей трёхэтажки — подвала нет
+
+                float length = home.Size.X, depth = home.Size.Z;
+                bool rearAlongZ = Math.Abs(rear.Z) > 0.5f;
+
+                // --- внешний вход и лестница ---
+                Vec2 stairTopGround = home.Center + rear * (depth / 2f + 3.4f);
+                Vec2 stairMidGround = home.Center + rear * (depth / 2f + 1.7f);
+                _solidFootprints.Add(Rect2.FromCenterSize(stairMidGround,
+                    rearAlongZ ? 2.4f : 3.6f, rearAlongZ ? 3.6f : 2.4f));
+                var entranceTop = new Vec3(stairTopGround.X, 0f, stairTopGround.Z);
+                AddObject(QuarterObjectTypes.BasementPoint, entranceTop, home.RotationY,
+                    new Vec3(2.4f, 0.07f, 1.2f),
+                    Params(("buildingId", home.Id), ("pointId", "basement.entry.exterior")));
+                const int steps = 7;
+                for (int i = 0; i < steps; i++)
+                {
+                    Vec2 sp = home.Center + rear * (depth / 2f + 3.0f - i * 0.42f);
+                    AddObject(QuarterObjectTypes.BasementStep, new Vec3(sp.X, -0.35f - i * 0.4f, sp.Z),
+                        home.RotationY, new Vec3(1.8f, 0.18f, 0.5f),
+                        Params(("buildingId", home.Id)));
+                }
+                Vec2 bottomGround = home.Center + rear * (depth / 2f + 0.2f);
+                var stairBottom = new Vec3(bottomGround.X, -2.8f, bottomGround.Z);
+                Vec2 doorGround = home.Center + rear * (depth / 2f - 0.15f);
+                var doorPos = new Vec3(doorGround.X, -2.8f, doorGround.Z);
+                AddObject(QuarterObjectTypes.BasementDoor, doorPos, home.RotationY,
+                    new Vec3(1.2f, 2.2f, 0.18f),
+                    Params(("buildingId", home.Id), ("pointId", "basement.door"),
+                           ("state", BasementDoorState.Locked.ToString()),
+                           ("material", "rusty-iron"), ("interactionRadius", "1.5")));
+                // Тусклый фонарь над входом снаружи.
+                Vec2 lampGround = home.Center + rear * (depth / 2f + 0.3f);
+                AddObject(QuarterObjectTypes.BasementLamp, new Vec3(lampGround.X, 2.4f, lampGround.Z),
+                    home.RotationY, new Vec3(0.3f, 0.25f, 0.3f),
+                    Params(("buildingId", home.Id), ("exterior", "true"), ("dim", "true")));
+
+                // --- интерьер: пол, потолок, стены (локальные координаты дома) ---
+                void Obj(string type, float lx, float y, float lz, Vec3 size, Dictionary<string, string> p = null)
+                {
+                    Vec2 w = LocalToWorld(home, lx, lz);
+                    AddObject(type, new Vec3(w.X, y, w.Z), home.RotationY, size,
+                        p ?? Params(("buildingId", home.Id)));
+                }
+
+                float floorY = -3.0f, wallBaseY = -2.8f;
+                Obj(QuarterObjectTypes.BasementFloor, 0f, floorY, 0f, new Vec3(length - 1f, 0.2f, depth - 1f));
+                Obj(QuarterObjectTypes.BasementCeiling, 0f, -0.3f, 0f, new Vec3(length - 1f, 0.2f, depth - 1f));
+                float hx = length / 2f - 0.6f, hz = depth / 2f - 0.6f;
+                // Наружные стены подвала. В задней стене (со стороны лестницы) —
+                // дверной проём шириной 1.4 м под железную дверь + перемычка над ним:
+                // сплошной стены поперёк прохода быть не должно.
+                Vec2 localZWorld = LocalToWorld(home, 0f, 1f) - home.Center;
+                float rearSign = (rear.X * localZWorld.X + rear.Z * localZWorld.Z) >= 0f ? 1f : -1f;
+                foreach (float side in new[] { -1f, 1f })
+                {
+                    if (Math.Abs(side - rearSign) > 0.01f)
+                    {
+                        Obj(QuarterObjectTypes.BasementWall, 0f, wallBaseY, side * hz, new Vec3(length - 1f, 2.6f, 0.3f));
+                    }
+                    else
+                    {
+                        float segLen = hx - 0.7f;
+                        Obj(QuarterObjectTypes.BasementWall, -(0.7f + segLen / 2f), wallBaseY, side * hz, new Vec3(segLen, 2.6f, 0.3f));
+                        Obj(QuarterObjectTypes.BasementWall, 0.7f + segLen / 2f, wallBaseY, side * hz, new Vec3(segLen, 2.6f, 0.3f));
+                        Obj(QuarterObjectTypes.BasementWall, 0f, wallBaseY + 2.2f, side * hz, new Vec3(1.4f, 0.4f, 0.3f)); // перемычка
+                    }
+                }
+                Obj(QuarterObjectTypes.BasementWall, -hx, wallBaseY, 0f, new Vec3(0.3f, 2.6f, depth - 1f));
+                Obj(QuarterObjectTypes.BasementWall, hx, wallBaseY, 0f, new Vec3(0.3f, 2.6f, depth - 1f));
+                // Перегородка коридор/комнаты (z=+1.1) с двумя дверными проёмами (разрывы сегментов).
+                Obj(QuarterObjectTypes.BasementWall, -8.5f, wallBaseY, 1.1f, new Vec3(3f, 2.6f, 0.25f));
+                Obj(QuarterObjectTypes.BasementWall, -1.5f, wallBaseY, 1.1f, new Vec3(5f, 2.6f, 0.25f));
+                Obj(QuarterObjectTypes.BasementWall, 5f, wallBaseY, 1.1f, new Vec3(2f, 2.6f, 0.25f));
+                // Стена секретной комнаты (x=+6): вторая дверь по центру коридора.
+                Obj(QuarterObjectTypes.BasementWall, 6f, wallBaseY, -1.9f, new Vec3(0.25f, 2.6f, 1.6f));
+                Obj(QuarterObjectTypes.BasementWall, 6f, wallBaseY, 1.9f, new Vec3(0.25f, 2.6f, 1.6f));
+                Obj(QuarterObjectTypes.BasementSecondDoor, 6f, wallBaseY, 0f, new Vec3(0.18f, 2.1f, 1.1f),
+                    Params(("buildingId", home.Id), ("state", BasementDoorState.Locked.ToString())));
+
+                // --- наполнение: стеллажи и ящики (storage), стол и стулья (table), трубы, лампы ---
+                foreach (float sx in new[] { 0.5f, 2.5f, 4.5f })
+                    Obj(QuarterObjectTypes.BasementShelf, sx, wallBaseY, 4.6f, new Vec3(1.8f, 2f, 0.6f));
+                foreach ((float cx2, float cz2) in new[] { (1f, 2f), (4f, 2.2f), (-8f, -0.5f), (8f, 1.8f) })
+                    Obj(QuarterObjectTypes.BasementCrate, cx2, wallBaseY, cz2, new Vec3(0.7f, 0.7f, 0.7f));
+                Obj(QuarterObjectTypes.BasementTable, -5.5f, wallBaseY, 3.2f, new Vec3(1.8f, 0.8f, 0.9f));
+                Obj(QuarterObjectTypes.BasementChair, -6.3f, wallBaseY, 3.2f, new Vec3(0.45f, 0.7f, 0.45f));
+                Obj(QuarterObjectTypes.BasementChair, -4.7f, wallBaseY, 3.2f, new Vec3(0.45f, 0.7f, 0.45f));
+                Obj(QuarterObjectTypes.BasementPipe, -2f, -0.55f, -0.7f, new Vec3(16f, 0.18f, 0.18f));
+                Obj(QuarterObjectTypes.BasementPipe, -2f, -0.8f, 0.7f, new Vec3(16f, 0.14f, 0.14f));
+                foreach (float lx in new[] { -7f, 0f, 7f })
+                    Obj(QuarterObjectTypes.BasementLamp, lx, -0.45f, 0f, new Vec3(0.35f, 0.12f, 0.35f),
+                        Params(("buildingId", home.Id), ("dim", "true")));
+
+                // --- именованные точки подвала ---
+                Vec2 insideDoor = doorGround - rear * 1.2f; // сразу за железной дверью
+                Vec2 tableW = LocalToWorld(home, -5.5f, 3.2f);
+                Vec2 storageW = LocalToWorld(home, 2.5f, 3.2f);
+                Vec2 secretW = LocalToWorld(home, 8.5f, 0f);
+                var points = new Dictionary<string, Vec3>
+                {
+                    { "basement.entry", new Vec3(insideDoor.X, -2.8f, insideDoor.Z) },
+                    { "basement.table", new Vec3(tableW.X, -2.8f, tableW.Z) },
+                    { "basement.storage", new Vec3(storageW.X, -2.8f, storageW.Z) },
+                    { "basement.secretroom", new Vec3(secretW.X, -2.8f, secretW.Z) },
+                };
+                foreach (KeyValuePair<string, Vec3> kv in points)
+                {
+                    AddObject(QuarterObjectTypes.BasementPoint, kv.Value, 0f,
+                        new Vec3(0.7f, 0.05f, 0.7f),
+                        Params(("buildingId", home.Id), ("pointId", kv.Key)));
+                }
+
+                _basement = new BasementInfo(home.Id, entranceTop, stairBottom, doorPos, points);
             }
 
             // ---------- уличное наполнение ----------
@@ -739,6 +1252,29 @@ namespace LifeFromZero.City.Quarter
                   .Append("|entrance=").Append(F(p.Entrance.X)).Append(',').Append(F(p.Entrance.Z))
                   .Append("|interaction=").Append(F(p.InteractionPoint.X)).Append(',').Append(F(p.InteractionPoint.Z))
                   .Append('\n');
+            }
+            if (plan.PlayerHome != null)
+                sb.Append(plan.PlayerHome.Id).Append("|building=").Append(plan.PlayerHome.BuildingId)
+                  .Append("|door=").Append(F(plan.PlayerHome.EntranceDoor.X)).Append(',').Append(F(plan.PlayerHome.EntranceDoor.Z))
+                  .Append('\n');
+            if (plan.Shop != null)
+                sb.Append(plan.Shop.Id).Append("|shop")
+                  .Append("|entrance=").Append(F(plan.Shop.Entrance.X)).Append(',').Append(F(plan.Shop.Entrance.Z))
+                  .Append('\n');
+            foreach (DeliveryPointInfo d in plan.DeliveryPoints)
+                sb.Append(d.Id).Append("|dropoff|building=").Append(d.BuildingId)
+                  .Append("|entrance=").Append(d.EntranceNumber)
+                  .Append('|').Append(F(d.Position.X)).Append(',').Append(F(d.Position.Z)).Append('\n');
+            if (plan.Basement != null)
+            {
+                sb.Append("basement|building=").Append(plan.Basement.BuildingId)
+                  .Append("|door=").Append(F(plan.Basement.DoorPosition.X)).Append(',').Append(F(plan.Basement.DoorPosition.Z));
+                var keys = new List<string>(plan.Basement.Points.Keys);
+                keys.Sort(StringComparer.Ordinal);
+                foreach (string key in keys)
+                    sb.Append('|').Append(key).Append('=')
+                      .Append(F(plan.Basement.Points[key].X)).Append(',').Append(F(plan.Basement.Points[key].Z));
+                sb.Append('\n');
             }
             return sb.ToString();
         }

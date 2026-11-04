@@ -14,6 +14,13 @@ namespace LifeFromZero.City.Quarter
     {
         public BuildingArchetype(string id, int floors, float depth, float floorHeight,
                                  float[] lengthVariants, float entranceSpacing)
+            : this(id, floors, depth, floorHeight, lengthVariants, entranceSpacing, "flat", "panel")
+        {
+        }
+
+        public BuildingArchetype(string id, int floors, float depth, float floorHeight,
+                                 float[] lengthVariants, float entranceSpacing,
+                                 string roofType, string facadeStyle)
         {
             Id = id ?? throw new ArgumentNullException(nameof(id));
             if (floors <= 0) throw new ArgumentOutOfRangeException(nameof(floors));
@@ -24,6 +31,8 @@ namespace LifeFromZero.City.Quarter
             FloorHeight = floorHeight;
             LengthVariants = lengthVariants;
             EntranceSpacing = entranceSpacing;
+            RoofType = roofType ?? "flat";       // "flat" | "pitched"
+            FacadeStyle = facadeStyle ?? "panel"; // "brick" | "panel" | "modern"
         }
 
         public string Id { get; }
@@ -35,13 +44,45 @@ namespace LifeFromZero.City.Quarter
         public IReadOnlyList<float> LengthVariants { get; }
         /// <summary>Шаг подъездов вдоль фасада, метры.</summary>
         public float EntranceSpacing { get; }
+        /// <summary>Тип крыши: "flat" (плоская) или "pitched" (скатная).</summary>
+        public string RoofType { get; }
+        /// <summary>Стиль фасада: "brick", "panel" или "modern" (влияет на цвет и детали адаптера).</summary>
+        public string FacadeStyle { get; }
 
         public float Height => Floors * FloorHeight;
 
-        /// <summary>Классическая пятиэтажка: 5 этажей, корпус 12 м, секции ~15 м.</summary>
+        /// <summary>Старая трёхэтажка: кирпич/штукатурка, скатная крыша.</summary>
+        public static BuildingArchetype BrickThreeStorey() =>
+            new BuildingArchetype("building.brick3", floors: 3, depth: 11f, floorHeight: 3.1f,
+                                  lengthVariants: new[] { 24f, 30f }, entranceSpacing: 12f,
+                                  roofType: "pitched", facadeStyle: "brick");
+
+        /// <summary>Классическая пятиэтажка: советская панель, плоская крыша.</summary>
         public static BuildingArchetype PanelFiveStorey() =>
             new BuildingArchetype("building.panel5", floors: 5, depth: 12f, floorHeight: 3f,
-                                  lengthVariants: new[] { 30f, 36f, 42f }, entranceSpacing: 15f);
+                                  lengthVariants: new[] { 30f, 36f, 42f }, entranceSpacing: 15f,
+                                  roofType: "flat", facadeStyle: "panel");
+
+        /// <summary>Современная десятиэтажка.</summary>
+        public static BuildingArchetype ModernTenStorey() =>
+            new BuildingArchetype("building.tower10", floors: 10, depth: 13f, floorHeight: 2.9f,
+                                  lengthVariants: new[] { 24f, 30f }, entranceSpacing: 12f,
+                                  roofType: "flat", facadeStyle: "modern");
+    }
+
+    /// <summary>
+    /// Дом игрока (кв. №67 — только номер в данных; саму квартиру/сцену
+    /// Apartment67 генератор не создаёт и не трогает).
+    /// Position/RotationY можно задать извне; если Position не задан —
+    /// генератор сам выбирает место на краю блока и резервирует его до застройки.
+    /// </summary>
+    public sealed class PlayerHomeOptions
+    {
+        public bool Enabled { get; set; } = true;
+        /// <summary>Центр дома в координатах квартала (метры). null = выбрать автоматически.</summary>
+        public Vec2? Position { get; set; }
+        /// <summary>Поворот дома: 0 или 90 градусов.</summary>
+        public float RotationY { get; set; } = 0f;
     }
 
     /// <summary>
@@ -108,9 +149,19 @@ namespace LifeFromZero.City.Quarter
         /// <summary>Ставить ли один пункт выдачи заказов (ПВЗ) у улицы. По умолчанию — да.</summary>
         public bool IncludePickupPoint { get; set; } = true;
 
-        /// <summary>Архетипы домов. Первый — основной; остальные подмешиваются случайно.</summary>
-        public List<BuildingArchetype> Archetypes { get; set; } =
-            new List<BuildingArchetype> { BuildingArchetype.PanelFiveStorey() };
+        /// <summary>Дом игрока с зарезервированным местом (см. PlayerHomeOptions).</summary>
+        public PlayerHomeOptions PlayerHome { get; set; } = new PlayerHomeOptions();
+
+        /// <summary>
+        /// Архетипы домов: трёхэтажки, пятиэтажки (преобладают) и десятиэтажки.
+        /// Генератор гарантирует присутствие каждого типа этажности из списка.
+        /// </summary>
+        public List<BuildingArchetype> Archetypes { get; set; } = new List<BuildingArchetype>
+        {
+            BuildingArchetype.PanelFiveStorey(),
+            BuildingArchetype.BrickThreeStorey(),
+            BuildingArchetype.ModernTenStorey(),
+        };
 
         /// <summary>Пользовательские размещатели: вызываются после базовой генерации.</summary>
         public List<IQuarterObjectPlacer> CustomPlacers { get; set; } = new List<IQuarterObjectPlacer>();

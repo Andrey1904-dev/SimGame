@@ -40,6 +40,188 @@ namespace LifeFromZero.City.Quarter
         public const string PickupSign = "pickup.sign";          // вывеска ПВЗ (параметр text)
         public const string PickupPlaza = "pickup.plaza";        // площадка перед входом ПВЗ
         public const string PickupPoint = "pickup.point";        // точка взаимодействия (будущее получение заказов)
+        public const string ShopBuilding = "shop.building";      // продуктовый магазин (одноэтажный)
+        public const string ShopRoof = "shop.roof";
+        public const string ShopDoor = "shop.door";
+        public const string ShopWindow = "shop.window";
+        public const string ShopSign = "shop.sign";              // вывеска «ПРОДУКТЫ» (параметр text)
+        public const string ShopPlaza = "shop.plaza";
+        public const string ShopPoint = "shop.grocery";          // точка взаимодействия магазина
+        public const string PlayerHomeMarker = "player.home";    // маркер дома игрока (у здания)
+        public const string PlayerHomeDoor = "player.home.door"; // дверь главного подъезда дома игрока
+        public const string PlayerHomeExit = "player.home.exit"; // точка выхода во двор из дома игрока
+        public const string DeliveryDropoff = "delivery.dropoff";// точка доставки у подъезда
+        // Дворовое наполнение (улучшенные дворы)
+        public const string Swing = "yard.swing";                // качели
+        public const string Sandbox = "yard.sandbox";            // песочница
+        public const string Urn = "yard.urn";                    // урна
+        public const string TrashContainer = "yard.trash";       // мусорный контейнер
+        public const string Bush = "yard.bush";                  // куст
+        public const string Footpath = "yard.footpath";          // пешеходная дорожка во дворе
+        // Подвал под трёхэтажкой
+        public const string BasementFloor = "basement.floor";
+        public const string BasementWall = "basement.wall";
+        public const string BasementCeiling = "basement.ceiling";
+        public const string BasementStep = "basement.step";      // ступень бетонной лестницы
+        public const string BasementDoor = "basement.door";      // железная дверь (точка взаимодействия)
+        public const string BasementSecondDoor = "basement.door.second"; // вторая, закрытая дверь
+        public const string BasementShelf = "basement.shelf";    // металлический стеллаж
+        public const string BasementCrate = "basement.crate";    // деревянный ящик
+        public const string BasementTable = "basement.table.object"; // стол (точка — basement.table в BasementInfo.Points)
+        public const string BasementChair = "basement.chair";
+        public const string BasementPipe = "basement.pipe";
+        public const string BasementLamp = "basement.lamp";
+        public const string BasementPoint = "basement.point";    // маркер именованной точки подвала
+    }
+
+    /// <summary>Дом игрока: здание из Buildings + входная дверь и выход во двор.</summary>
+    public sealed class PlayerHomeInfo
+    {
+        public const string SpecialId = "player.home";
+        public const int ApartmentNumber = 67; // только номер в данных; квартиру/сцену не создаём
+
+        public PlayerHomeInfo(string buildingId, Vec2 center, float rotationY,
+                              Vec3 entranceDoor, Vec3 courtyardExit)
+        {
+            BuildingId = buildingId; Center = center; RotationY = rotationY;
+            EntranceDoor = entranceDoor; CourtyardExit = courtyardExit;
+        }
+
+        public string Id => SpecialId;
+        public string BuildingId { get; }
+        public Vec2 Center { get; }
+        public float RotationY { get; }
+        /// <summary>Дверь главного подъезда (первый подъезд здания).</summary>
+        public Vec3 EntranceDoor { get; }
+        /// <summary>Точка выхода во двор: перед главным подъездом, в сторону двора.</summary>
+        public Vec3 CourtyardExit { get; }
+    }
+
+    /// <summary>
+    /// Точка доставки у подъезда жилого дома. Только данные и маркер:
+    /// модуль Delivery не изменяется, выдача сюда не зашита.
+    /// </summary>
+    public sealed class DeliveryPointInfo
+    {
+        public const float DefaultInteractionRadius = 1.5f;
+
+        public DeliveryPointInfo(string id, string buildingId, int entranceNumber, Vec3 position)
+        {
+            Id = id; BuildingId = buildingId; EntranceNumber = entranceNumber; Position = position;
+        }
+
+        public string Id { get; }
+        public string BuildingId { get; }
+        /// <summary>Номер подъезда, начиная с 1.</summary>
+        public int EntranceNumber { get; }
+        /// <summary>Перед входом, вне стен здания.</summary>
+        public Vec3 Position { get; }
+        public float InteractionRadius => DefaultInteractionRadius;
+        public string TypeId => QuarterObjectTypes.DeliveryDropoff;
+    }
+
+    /// <summary>Продуктовый магазин: здание + вход + точка взаимодействия shop.grocery.</summary>
+    public sealed class GroceryShopInfo
+    {
+        public const string SignText = "ПРОДУКТЫ";
+
+        public GroceryShopInfo(string id, Vec2 center, Vec3 size, Vec3 entrance,
+                               Vec3 interactionPoint, Rect2 plaza, Rect2 buildingFootprint)
+        {
+            Id = id; Center = center; Size = size; Entrance = entrance;
+            InteractionPoint = interactionPoint; Plaza = plaza; BuildingFootprint = buildingFootprint;
+        }
+
+        public string Id { get; }
+        public Vec2 Center { get; }
+        public Vec3 Size { get; }
+        public Vec3 Entrance { get; }
+        public Vec3 InteractionPoint { get; }
+        public Rect2 Plaza { get; }
+        public Rect2 BuildingFootprint { get; }
+    }
+
+    /// <summary>Состояния железной двери подвала.</summary>
+    public enum BasementDoorState
+    {
+        Closed,
+        Open,
+        Locked
+    }
+
+    /// <summary>
+    /// Логика железной двери подвала без Unity: состояния и переходы.
+    /// Unity-компонент BasementDoor использует этот же контроллер и только
+    /// поворачивает дверь на петлях по состоянию.
+    /// </summary>
+    public sealed class BasementDoorController
+    {
+        public BasementDoorController(BasementDoorState initial = BasementDoorState.Locked)
+        {
+            State = initial;
+        }
+
+        public BasementDoorState State { get; private set; }
+        public bool IsOpen => State == BasementDoorState.Open;
+
+        /// <summary>Открыть: из Closed — да, из Locked/Open — нет.</summary>
+        public bool Open()
+        {
+            if (State != BasementDoorState.Closed) return false;
+            State = BasementDoorState.Open;
+            return true;
+        }
+
+        public bool Close()
+        {
+            if (State != BasementDoorState.Open) return false;
+            State = BasementDoorState.Closed;
+            return true;
+        }
+
+        /// <summary>Взаимодействие игрока: Closed↔Open; Locked не открывается без Unlock.</summary>
+        public bool Toggle() => IsOpen ? Close() : Open();
+
+        public bool Unlock()
+        {
+            if (State != BasementDoorState.Locked) return false;
+            State = BasementDoorState.Closed;
+            return true;
+        }
+
+        public bool Lock()
+        {
+            if (State != BasementDoorState.Closed) return false;
+            State = BasementDoorState.Locked;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Подвал под одной трёхэтажкой: вход снаружи, лестница, дверь и именованные
+    /// точки внутри (entry/table/storage/secretroom). Квестов/NPC здесь нет.
+    /// Координаты точек — мировые; Y отрицательный (подвал ниже земли, пол ≈ -2.8 м).
+    /// </summary>
+    public sealed class BasementInfo
+    {
+        public BasementInfo(string buildingId, Vec3 entrance, Vec3 stairBottom, Vec3 doorPosition,
+                            IReadOnlyDictionary<string, Vec3> points)
+        {
+            BuildingId = buildingId; Entrance = entrance; StairBottom = stairBottom;
+            DoorPosition = doorPosition; Points = points;
+        }
+
+        public string BuildingId { get; }
+        /// <summary>Начало лестницы снаружи (у торца/задней стороны дома), уровень земли.</summary>
+        public Vec3 Entrance { get; }
+        /// <summary>Низ лестницы, перед железной дверью.</summary>
+        public Vec3 StairBottom { get; }
+        /// <summary>Железная дверь (точка взаимодействия basement.door).</summary>
+        public Vec3 DoorPosition { get; }
+        /// <summary>Начальное состояние двери.</summary>
+        public BasementDoorState InitialDoorState => BasementDoorState.Locked;
+        /// <summary>Точки: basement.entry / basement.table / basement.storage / basement.secretroom.</summary>
+        public IReadOnlyDictionary<string, Vec3> Points { get; }
     }
 
     /// <summary>
@@ -171,9 +353,18 @@ namespace LifeFromZero.City.Quarter
     {
         public BuildingInfo(string id, string archetypeId, Vec2 center, float rotationY, Vec3 size,
                             int floors, IReadOnlyList<Vec2> entrances)
+            : this(id, archetypeId, center, rotationY, size, floors, entrances, "panel", "flat", null, false)
+        {
+        }
+
+        public BuildingInfo(string id, string archetypeId, Vec2 center, float rotationY, Vec3 size,
+                            int floors, IReadOnlyList<Vec2> entrances,
+                            string facadeStyle, string roofType, string facadeColor, bool isPlayerHome)
         {
             Id = id; ArchetypeId = archetypeId; Center = center; RotationY = rotationY;
             Size = size; Floors = floors; Entrances = entrances;
+            FacadeStyle = facadeStyle; RoofType = roofType; FacadeColor = facadeColor;
+            IsPlayerHome = isPlayerHome;
         }
 
         public string Id { get; }
@@ -183,6 +374,14 @@ namespace LifeFromZero.City.Quarter
         public Vec3 Size { get; }
         public int Floors { get; }
         public IReadOnlyList<Vec2> Entrances { get; }
+        /// <summary>"brick" | "panel" | "modern" — влияет на детали фасада в адаптере.</summary>
+        public string FacadeStyle { get; }
+        /// <summary>"flat" | "pitched".</summary>
+        public string RoofType { get; }
+        /// <summary>Цвет фасада, hex "#RRGGBB" (может быть null).</summary>
+        public string FacadeColor { get; }
+        /// <summary>Это дом игрока (player.home).</summary>
+        public bool IsPlayerHome { get; }
 
         public Rect2 Footprint
         {
@@ -199,9 +398,19 @@ namespace LifeFromZero.City.Quarter
     {
         public CourtyardInfo(string id, Rect2 area, Vec2 parkingCenter, int benches, int trees,
                              int parkingStalls, bool hasPlayground)
+            : this(id, area, parkingCenter, benches, trees, parkingStalls, hasPlayground, 0, 0, 0, 0, 0, false)
+        {
+        }
+
+        public CourtyardInfo(string id, Rect2 area, Vec2 parkingCenter, int benches, int trees,
+                             int parkingStalls, bool hasPlayground,
+                             int swings, int sandboxes, int urns, int trashContainers, int bushes,
+                             bool hasFootpath)
         {
             Id = id; Area = area; ParkingCenter = parkingCenter; Benches = benches;
             Trees = trees; ParkingStalls = parkingStalls; HasPlayground = hasPlayground;
+            Swings = swings; Sandboxes = sandboxes; Urns = urns;
+            TrashContainers = trashContainers; Bushes = bushes; HasFootpath = hasFootpath;
         }
 
         public string Id { get; }
@@ -211,6 +420,12 @@ namespace LifeFromZero.City.Quarter
         public int Trees { get; }
         public int ParkingStalls { get; }
         public bool HasPlayground { get; }
+        public int Swings { get; }
+        public int Sandboxes { get; }
+        public int Urns { get; }
+        public int TrashContainers { get; }
+        public int Bushes { get; }
+        public bool HasFootpath { get; }
     }
 
     /// <summary>Результат генерации квартала: всё, что нужно адаптеру и тестам.</summary>
@@ -233,9 +448,27 @@ namespace LifeFromZero.City.Quarter
                            IReadOnlyList<BuildingInfo> buildings,
                            IReadOnlyList<CourtyardInfo> courtyards,
                            PickupPointInfo pickupPoint)
+            : this(seed, size, objects, roads, nodes, buildings, courtyards, pickupPoint,
+                   null, null, null, new DeliveryPointInfo[0])
+        {
+        }
+
+        public QuarterPlan(int seed, float size,
+                           IReadOnlyList<PlacedObject> objects,
+                           IReadOnlyList<RoadSegment> roads,
+                           IReadOnlyList<RoadNode> nodes,
+                           IReadOnlyList<BuildingInfo> buildings,
+                           IReadOnlyList<CourtyardInfo> courtyards,
+                           PickupPointInfo pickupPoint,
+                           PlayerHomeInfo playerHome,
+                           GroceryShopInfo shop,
+                           BasementInfo basement,
+                           IReadOnlyList<DeliveryPointInfo> deliveryPoints)
         {
             Seed = seed; Size = size; Objects = objects; Roads = roads; Nodes = nodes;
             Buildings = buildings; Courtyards = courtyards; PickupPoint = pickupPoint;
+            PlayerHome = playerHome; Shop = shop; Basement = basement;
+            DeliveryPoints = deliveryPoints ?? new DeliveryPointInfo[0];
         }
 
         public int Seed { get; }
@@ -248,6 +481,14 @@ namespace LifeFromZero.City.Quarter
         public IReadOnlyList<CourtyardInfo> Courtyards { get; }
         /// <summary>Единственный ПВЗ квартала (null, если генерация шла без него — у генератора всегда есть).</summary>
         public PickupPointInfo PickupPoint { get; }
+        /// <summary>Дом игрока player.home (null при PlayerHome.Enabled=false).</summary>
+        public PlayerHomeInfo PlayerHome { get; }
+        /// <summary>Единственный продуктовый магазин (shop.grocery).</summary>
+        public GroceryShopInfo Shop { get; }
+        /// <summary>Подвал под одной трёхэтажкой (null, если в квартале нет трёхэтажек).</summary>
+        public BasementInfo Basement { get; }
+        /// <summary>Точки доставки у каждого жилого подъезда (delivery.dropoff).</summary>
+        public IReadOnlyList<DeliveryPointInfo> DeliveryPoints { get; }
 
         public IEnumerable<PlacedObject> OfType(string typeId)
         {

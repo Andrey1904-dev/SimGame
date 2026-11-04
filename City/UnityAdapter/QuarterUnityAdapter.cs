@@ -71,8 +71,22 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
 
         private void CreateObject(PlacedObject obj, Transform root)
         {
+            // Подъезд жилого дома — не куб-заглушка, а дверь + козырёк + номер.
+            if (obj.TypeId == QuarterObjectTypes.Entrance && !_prefabs.ContainsKey(obj.TypeId))
+            {
+                BuildEntrance(obj, root);
+                return;
+            }
+            // Железная дверь подвала — отдельный компонент на петлях.
+            if (obj.TypeId == QuarterObjectTypes.BasementDoor && !_prefabs.ContainsKey(obj.TypeId))
+            {
+                BuildBasementDoor(obj, root);
+                return;
+            }
+
             GameObject go;
-            if (_prefabs.TryGetValue(obj.TypeId, out GameObject prefab))
+            bool isPrefab = _prefabs.TryGetValue(obj.TypeId, out GameObject prefab);
+            if (isPrefab)
             {
                 go = Instantiate(prefab, root);
             }
@@ -83,13 +97,23 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             }
 
             go.name = obj.TypeId + "_" + obj.Id;
-            if (obj.TypeId == QuarterObjectTypes.PickupSign)
-                AddSignText(go, obj.Param("text", PickupPointInfo.SignText));
+            if (obj.TypeId == QuarterObjectTypes.PickupSign || obj.TypeId == QuarterObjectTypes.ShopSign)
+                AddSignText(go, obj.Param("text",
+                    obj.TypeId == QuarterObjectTypes.ShopSign ? GroceryShopInfo.SignText : PickupPointInfo.SignText));
             // План: позиция — центр следа на земле; объём — Size. Ставим центр по высоте.
             go.transform.localPosition = new Vector3(obj.Position.X, obj.Position.Y + obj.Size.Y / 2f, obj.Position.Z);
-            go.transform.localRotation = Quaternion.Euler(0f, obj.RotationY, 0f);
-            if (!_prefabs.ContainsKey(obj.TypeId))
+            go.transform.localRotation = obj.TypeId == QuarterObjectTypes.BasementPipe
+                ? Quaternion.Euler(0f, obj.RotationY, 0f) * Quaternion.Euler(0f, 0f, 90f) // труба: цилиндр вдоль корпуса
+                : Quaternion.Euler(0f, obj.RotationY, 0f);
+            if (!isPrefab)
                 go.transform.localScale = ScaleFor(go, obj);
+
+            if (obj.TypeId == QuarterObjectTypes.Tree && !isPrefab)
+                AddTreeCanopy(go);
+            if (obj.TypeId == QuarterObjectTypes.Building && !isPrefab)
+                BuildBuildingDetails(obj, root);
+            if (obj.TypeId != QuarterObjectTypes.BasementLamp)
+                go.isStatic = true; // статичная геометрия: Unity сможет батчить; материалы и меши примитивов общие
 
             if (addColliders && NeedsCollider(obj.TypeId) && go.GetComponent<Collider>() == null)
             {
@@ -98,11 +122,96 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             }
         }
 
+        /// <summary>Подъезд: дверь у стены, козырёк над ней, номер подъезда текстом.</summary>
+        private void BuildEntrance(PlacedObject obj, Transform root)
+        {
+            float nx = ParseFloat(obj.Param("normalX"), 0f);
+            float nz = ParseFloat(obj.Param("normalZ"), 1f);
+            var normal = new Vector3(nx, 0f, nz);
+            if (normal.sqrMagnitude < 0.01f) normal = Vector3.forward;
+            normal.Normalize();
+            Vector3 wallPoint = new Vector3(obj.Position.X, 0f, obj.Position.Z) - normal * 0.35f;
+            Quaternion facing = Quaternion.LookRotation(normal, Vector3.up);
+            string suffix = "_" + obj.Id;
+
+            var door = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            door.name = "entrance.door" + suffix;
+            door.transform.SetParent(root, false);
+            door.transform.localPosition = wallPoint + normal * 0.06f + Vector3.up * 1.05f;
+            door.transform.localRotation = facing;
+            door.transform.localScale = new Vector3(1.1f, 2.1f, 0.1f);
+            door.GetComponent<Renderer>().sharedMaterial = MaterialFor("entrance.door");
+            door.isStatic = true;
+
+            var canopy = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            canopy.name = "entrance.canopy" + suffix;
+            canopy.transform.SetParent(root, false);
+            canopy.transform.localPosition = wallPoint + normal * 0.55f + Vector3.up * 2.3f;
+            canopy.transform.localRotation = facing;
+            canopy.transform.localScale = new Vector3(1.9f, 0.1f, 1.1f);
+            canopy.GetComponent<Renderer>().sharedMaterial = MaterialFor("entrance.canopy");
+            canopy.isStatic = true;
+            var canopyCollider = canopy.GetComponent<Collider>();
+            if (canopyCollider != null) Destroy(canopyCollider);
+
+            string number = obj.Param("entranceNumber");
+            if (!string.IsNullOrEmpty(number))
+            {
+                var textObject = new GameObject("entrance.number" + suffix);
+                textObject.transform.SetParent(root, false);
+                textObject.transform.localPosition = wallPoint + normal * 0.2f + Vector3.up * 2.55f;
+                textObject.transform.localRotation = facing;
+                var mesh = textObject.AddComponent<TextMesh>();
+                mesh.text = number;
+                mesh.fontSize = 48;
+                mesh.characterSize = 0.3f;
+                mesh.anchor = TextAnchor.MiddleCenter;
+                mesh.alignment = TextAlignment.Center;
+                mesh.color = Color.white;
+            }
+        }
+
+        /// <summary>
+        /// Железная дверь подвала: петля по левому краю, компонент BasementDoor
+        /// поворачивает дверь по состоянию контроллера из ядра.
+        /// </summary>
+        private void BuildBasementDoor(PlacedObject obj, Transform root)
+        {
+            var pivot = new GameObject(obj.TypeId + "_" + obj.Id);
+            pivot.transform.SetParent(root, false);
+            Quaternion rot = Quaternion.Euler(0f, obj.RotationY, 0f);
+            Vector3 center = new Vector3(obj.Position.X, obj.Position.Y + obj.Size.Y / 2f, obj.Position.Z);
+            Vector3 axisX = rot * Vector3.right;
+            pivot.transform.localPosition = center - axisX * (obj.Size.X / 2f); // край-петля
+            pivot.transform.localRotation = rot;
+
+            var door = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            door.name = "basement.door.leaf";
+            door.transform.SetParent(pivot.transform, false);
+            door.transform.localPosition = new Vector3(obj.Size.X / 2f, 0f, 0f);
+            door.transform.localScale = new Vector3(obj.Size.X, obj.Size.Y, obj.Size.Z);
+            door.GetComponent<Renderer>().sharedMaterial = MaterialFor(QuarterObjectTypes.BasementDoor);
+            // Коллайдер от CreatePrimitive остаётся и едет вместе с дверью на петле.
+
+            var component = pivot.AddComponent<BasementDoor>();
+            component.Configure(new BasementDoorController(BasementDoorState.Locked));
+        }
+
+        private static float ParseFloat(string value, float fallback)
+        {
+            return float.TryParse(value, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float parsed) ? parsed : fallback;
+        }
+
         private static bool NeedsCollider(string typeId) =>
             typeId == QuarterObjectTypes.Building || typeId == QuarterObjectTypes.Tree ||
             typeId == QuarterObjectTypes.StreetLamp || typeId == QuarterObjectTypes.YardLamp ||
             typeId == QuarterObjectTypes.Bench || typeId == QuarterObjectTypes.Playground ||
-            typeId == QuarterObjectTypes.PickupBuilding;
+            typeId == QuarterObjectTypes.PickupBuilding || typeId == QuarterObjectTypes.ShopBuilding ||
+            typeId == QuarterObjectTypes.BasementWall || typeId == QuarterObjectTypes.BasementSecondDoor ||
+            typeId == QuarterObjectTypes.BasementShelf || typeId == QuarterObjectTypes.BasementTable ||
+            typeId == QuarterObjectTypes.TrashContainer || typeId == QuarterObjectTypes.Swing ||
+            typeId == QuarterObjectTypes.Sandbox;
 
         /// <summary>
         /// Текст вывески ПВЗ: встроенный TextMesh (без ассетов и шрифтов из пакетов).
@@ -126,12 +235,191 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
 
         private static Vector3 ScaleFor(GameObject go, PlacedObject obj)
         {
+            // Труба: цилиндр повёрнут вокруг Z, длина Size.X — это его высота.
+            if (obj.TypeId == QuarterObjectTypes.BasementPipe)
+                return new Vector3(obj.Size.Z, obj.Size.X / 2f, obj.Size.Z);
             // Цилиндры Unity имеют высоту 2 и диаметр 1 — компенсируем для деревьев/фонарей.
             if (go.GetComponent<MeshFilter>() != null &&
                 go.GetComponent<MeshFilter>().sharedMesh != null &&
                 go.GetComponent<MeshFilter>().sharedMesh.name.Contains("Cylinder"))
                 return new Vector3(obj.Size.X, obj.Size.Y / 2f, obj.Size.Z);
             return new Vector3(obj.Size.X, obj.Size.Y, obj.Size.Z);
+        }
+
+        /// <summary>Крона дерева — сфера-ребёнок ствола-цилиндра (масштаб компенсирует масштаб родителя).</summary>
+        private void AddTreeCanopy(GameObject trunk)
+        {
+            var canopy = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            canopy.name = "tree.canopy";
+            canopy.transform.SetParent(trunk.transform, false);
+            canopy.transform.localPosition = new Vector3(0f, 0.38f, 0f);
+            canopy.transform.localScale = new Vector3(1.05f, 0.42f, 1.05f);
+            canopy.GetComponent<Renderer>().sharedMaterial = MaterialFor("tree.canopy");
+            var collider = canopy.GetComponent<Collider>();
+            if (collider != null) Destroy(collider);
+        }
+
+        /// <summary>
+        /// Детализация жилого дома ОДНИМ объектом на вид детали (не сотни кубов):
+        /// окна, балконы с ограждениями, панельные швы и крыша собираются в
+        /// объединённые меши с общими материалами. Количество окон и балконов
+        /// зависит от этажности и длины корпуса из данных генератора.
+        /// </summary>
+        private void BuildBuildingDetails(PlacedObject obj, Transform root)
+        {
+            int floors = Mathf.RoundToInt(ParseFloat(obj.Param("floors"), 5f));
+            if (floors < 1) floors = 1;
+            string style = obj.Param("style", "panel");
+            string roof = obj.Param("roof", "flat");
+            float length = obj.Size.X, height = obj.Size.Y, depth = obj.Size.Z;
+            float floorHeight = height / floors;
+
+            var windows = new MeshBuilder();
+            var concrete = new MeshBuilder();
+            var seams = new MeshBuilder();
+
+            int perFloor = Mathf.FloorToInt(length / 3f);
+            if (perFloor < 2) perFloor = 2;
+            for (int floor = 0; floor < floors; floor++)
+            {
+                float y = 1.55f + floor * floorHeight;
+                if (y > height - 0.7f) break;
+                for (int i = 0; i < perFloor; i++)
+                {
+                    float x = -length / 2f + (i + 0.5f) * (length / perFloor);
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        float facadeZ = side * (depth / 2f);
+                        windows.AddBox(new Vector3(x, y, facadeZ + side * 0.04f), new Vector3(1.3f, 1.35f, 0.07f));
+                        // Балконы со второго этажа, каждое третье окно.
+                        if (floor >= 1 && i % 3 == 1)
+                        {
+                            concrete.AddBox(new Vector3(x, y - 0.78f, facadeZ + side * 0.5f), new Vector3(2f, 0.12f, 1f)); // плита
+                            concrete.AddBox(new Vector3(x, y - 0.3f, facadeZ + side * 0.98f), new Vector3(2f, 0.85f, 0.05f)); // ограждение спереди
+                            concrete.AddBox(new Vector3(x - 0.98f, y - 0.3f, facadeZ + side * 0.5f), new Vector3(0.05f, 0.85f, 1f));
+                            concrete.AddBox(new Vector3(x + 0.98f, y - 0.3f, facadeZ + side * 0.5f), new Vector3(0.05f, 0.85f, 1f));
+                        }
+                    }
+                }
+            }
+
+            // Панельные швы пятиэтажек: горизонтали по этажам + вертикали каждые 3 м.
+            if (style == "panel")
+            {
+                for (int floor = 1; floor < floors; floor++)
+                {
+                    float y = floor * floorHeight;
+                    for (int side = -1; side <= 1; side += 2)
+                        seams.AddBox(new Vector3(0f, y, side * (depth / 2f + 0.02f)), new Vector3(length, 0.05f, 0.03f));
+                }
+                for (float x = -length / 2f + 3f; x < length / 2f - 0.5f; x += 3f)
+                    for (int side = -1; side <= 1; side += 2)
+                        seams.AddBox(new Vector3(x, height / 2f, side * (depth / 2f + 0.02f)), new Vector3(0.05f, height, 0.03f));
+            }
+
+            // Крыша: плоская — плита; скатная — призма.
+            var roofBuilder = new MeshBuilder();
+            if (roof == "pitched")
+                roofBuilder.AddPrism(new Vector3(0f, height, 0f), length + 0.5f, depth + 0.6f, Mathf.Min(2.6f, depth * 0.28f));
+            else
+                roofBuilder.AddBox(new Vector3(0f, height + 0.12f, 0f), new Vector3(length + 0.4f, 0.25f, depth + 0.4f));
+
+            CreateDetailMesh(windows, "detail.windows", obj, root, MaterialFor("detail.glass"));
+            CreateDetailMesh(concrete, "detail.balconies", obj, root, MaterialFor("detail.concrete"));
+            CreateDetailMesh(seams, "detail.seams", obj, root, MaterialFor("detail.seam"));
+            CreateDetailMesh(roofBuilder, "detail.roof", obj, root,
+                MaterialFor(roof == "pitched" ? "detail.roof.pitched" : "detail.roof.flat"));
+        }
+
+        private void CreateDetailMesh(MeshBuilder builder, string name, PlacedObject building, Transform root, Material material)
+        {
+            Mesh mesh = builder.Build();
+            if (mesh == null) return;
+            var go = new GameObject(name + "_" + building.Id);
+            go.transform.SetParent(root, false);
+            go.transform.localPosition = new Vector3(building.Position.X, building.Position.Y, building.Position.Z);
+            go.transform.localRotation = Quaternion.Euler(0f, building.RotationY, 0f);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = material;
+            go.isStatic = true;
+        }
+
+        /// <summary>Накопитель боксов/призм в один меш: общие материалы, минимум draw calls.</summary>
+        private sealed class MeshBuilder
+        {
+            private readonly List<Vector3> _vertices = new List<Vector3>();
+            private readonly List<Vector3> _normals = new List<Vector3>();
+            private readonly List<int> _triangles = new List<int>();
+
+            public void AddBox(Vector3 center, Vector3 size)
+            {
+                Vector3 h = size / 2f;
+                // 6 граней: направление, два касательных направления.
+                AddFace(center, new Vector3(0, 0, 1), new Vector3(1, 0, 0), new Vector3(0, 1, 0), h);
+                AddFace(center, new Vector3(0, 0, -1), new Vector3(-1, 0, 0), new Vector3(0, 1, 0), h);
+                AddFace(center, new Vector3(1, 0, 0), new Vector3(0, 0, -1), new Vector3(0, 1, 0), h);
+                AddFace(center, new Vector3(-1, 0, 0), new Vector3(0, 0, 1), new Vector3(0, 1, 0), h);
+                AddFace(center, new Vector3(0, 1, 0), new Vector3(1, 0, 0), new Vector3(0, 0, -1), h);
+                AddFace(center, new Vector3(0, -1, 0), new Vector3(1, 0, 0), new Vector3(0, 0, 1), h);
+            }
+
+            private void AddFace(Vector3 center, Vector3 normal, Vector3 tangent, Vector3 bitangent, Vector3 half)
+            {
+                float n = Vector3.Dot(normal, half);
+                float t = Vector3.Dot(tangent, half);
+                float b = Vector3.Dot(bitangent, half);
+                // Модули полуразмеров по осям граней.
+                float ht = Mathf.Abs(t), hb = Mathf.Abs(b);
+                Vector3 c = center + normal * Mathf.Abs(n);
+                int start = _vertices.Count;
+                _vertices.Add(c - tangent * ht - bitangent * hb);
+                _vertices.Add(c + tangent * ht - bitangent * hb);
+                _vertices.Add(c + tangent * ht + bitangent * hb);
+                _vertices.Add(c - tangent * ht + bitangent * hb);
+                for (int i = 0; i < 4; i++) _normals.Add(normal);
+                _triangles.Add(start); _triangles.Add(start + 1); _triangles.Add(start + 2);
+                _triangles.Add(start); _triangles.Add(start + 2); _triangles.Add(start + 3);
+            }
+
+            /// <summary>Скатная крыша: конёк вдоль X на высоте height над baseCenter.</summary>
+            public void AddPrism(Vector3 baseCenter, float length, float width, float height)
+            {
+                float x = length / 2f, z = width / 2f, y0 = baseCenter.y, y1 = baseCenter.y + height;
+                var a = new Vector3(baseCenter.x - x, y0, baseCenter.z - z);
+                var b = new Vector3(baseCenter.x + x, y0, baseCenter.z - z);
+                var c = new Vector3(baseCenter.x + x, y0, baseCenter.z + z);
+                var d = new Vector3(baseCenter.x - x, y0, baseCenter.z + z);
+                var r1 = new Vector3(baseCenter.x - x, y1, baseCenter.z);
+                var r2 = new Vector3(baseCenter.x + x, y1, baseCenter.z);
+                AddQuad(a, b, r2, r1); // южный скат
+                AddQuad(c, d, r1, r2); // северный скат
+                AddQuad(a, r1, d, a);  // западный фронтон (треугольник: продублированная вершина допустима)
+                AddQuad(b, c, r2, b);  // восточный фронтон
+                AddQuad(d, c, b, a);   // низ
+            }
+
+            private void AddQuad(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3)
+            {
+                Vector3 normal = Vector3.Cross(p1 - p0, p3 - p0);
+                if (normal.sqrMagnitude < 0.0001f) return;
+                normal.Normalize();
+                int start = _vertices.Count;
+                _vertices.Add(p0); _vertices.Add(p1); _vertices.Add(p2); _vertices.Add(p3);
+                for (int i = 0; i < 4; i++) _normals.Add(normal);
+                _triangles.Add(start); _triangles.Add(start + 1); _triangles.Add(start + 2);
+                _triangles.Add(start); _triangles.Add(start + 2); _triangles.Add(start + 3);
+            }
+
+            public Mesh Build()
+            {
+                if (_triangles.Count == 0) return null;
+                var mesh = new Mesh { name = "QuarterDetail" };
+                mesh.SetVertices(_vertices);
+                mesh.SetNormals(_normals);
+                mesh.SetTriangles(_triangles, 0);
+                mesh.RecalculateBounds();
+                return mesh;
+            }
         }
 
         private GameObject CreatePrimitive(PlacedObject obj, Transform root)
@@ -142,8 +430,16 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 case QuarterObjectTypes.Tree:
                 case QuarterObjectTypes.StreetLamp:
                 case QuarterObjectTypes.YardLamp:
+                case QuarterObjectTypes.Urn:
                 case QuarterObjectTypes.PickupPoint: // плоский диск-маркер точки взаимодействия
+                case QuarterObjectTypes.ShopPoint:
+                case QuarterObjectTypes.DeliveryDropoff:
+                case QuarterObjectTypes.PlayerHomeExit:
+                case QuarterObjectTypes.BasementPoint:
                     primitive = PrimitiveType.Cylinder;
+                    break;
+                case QuarterObjectTypes.Bush:
+                    primitive = PrimitiveType.Sphere;
                     break;
                 default:
                     primitive = PrimitiveType.Cube;
@@ -153,12 +449,41 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             var go = GameObject.CreatePrimitive(primitive);
             go.transform.SetParent(root, false);
             var renderer = go.GetComponent<Renderer>();
-            if (renderer != null) renderer.sharedMaterial = MaterialFor(obj.TypeId);
+            if (renderer != null) renderer.sharedMaterial = MaterialForObject(obj);
             // CreatePrimitive уже даёт коллайдер; примитивам дорог/разметки он не нужен.
             var existing = go.GetComponent<Collider>();
             if (existing != null && !NeedsCollider(obj.TypeId))
                 Destroy(existing);
             return go;
+        }
+
+        /// <summary>Материал объекта: у жилых домов — по цвету фасада из данных (кэш по цвету).</summary>
+        private Material MaterialForObject(PlacedObject obj)
+        {
+            if (obj.TypeId == QuarterObjectTypes.Building)
+            {
+                string hex = obj.Param("facadeColor");
+                if (!string.IsNullOrEmpty(hex) && ColorUtility.TryParseHtmlString(hex, out Color facade))
+                {
+                    string key = "facade:" + hex;
+                    if (!_materials.TryGetValue(key, out Material cachedFacade))
+                    {
+                        cachedFacade = CreateMaterial(facade);
+                        _materials[key] = cachedFacade;
+                    }
+                    return cachedFacade;
+                }
+            }
+            if (obj.TypeId == QuarterObjectTypes.Tree)
+                return MaterialFor("tree.trunk");
+            return MaterialFor(obj.TypeId);
+        }
+
+        private Material CreateMaterial(Color color)
+        {
+            // Shader.Find("Universal Render Pipeline/Lit") — для URP; в Built-in проекте заменить на "Standard".
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+            return new Material(shader) { color = color };
         }
 
         /// <summary>Процедурные материалы URP/HDRP-совместимые через Standard-шейдер проекта по умолчанию.</summary>
@@ -189,6 +514,45 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 case QuarterObjectTypes.PickupSign: color = new Color(0.95f, 0.45f, 0.1f); break; // оранжевая вывеска
                 case QuarterObjectTypes.PickupPlaza: color = new Color(0.6f, 0.6f, 0.6f); break;
                 case QuarterObjectTypes.PickupPoint: color = new Color(0.95f, 0.6f, 0.1f); break; // маркер взаимодействия
+                case QuarterObjectTypes.ShopBuilding: color = new Color(0.82f, 0.78f, 0.7f); break;
+                case QuarterObjectTypes.ShopRoof: color = new Color(0.3f, 0.3f, 0.32f); break;
+                case QuarterObjectTypes.ShopDoor: color = new Color(0.2f, 0.45f, 0.3f); break;
+                case QuarterObjectTypes.ShopWindow: color = new Color(0.6f, 0.8f, 0.95f); break;
+                case QuarterObjectTypes.ShopSign: color = new Color(0.2f, 0.65f, 0.3f); break; // зелёная вывеска «ПРОДУКТЫ»
+                case QuarterObjectTypes.ShopPlaza: color = new Color(0.6f, 0.6f, 0.6f); break;
+                case QuarterObjectTypes.ShopPoint: color = new Color(0.2f, 0.8f, 0.35f); break;
+                case QuarterObjectTypes.DeliveryDropoff: color = new Color(0.2f, 0.5f, 0.95f); break; // синий маркер доставки
+                case QuarterObjectTypes.PlayerHomeDoor: color = new Color(0.4f, 0.25f, 0.12f); break;
+                case QuarterObjectTypes.PlayerHomeExit: color = new Color(0.95f, 0.85f, 0.2f); break;
+                case QuarterObjectTypes.PlayerHomeMarker: color = new Color(0.95f, 0.85f, 0.2f); break;
+                case "entrance.door": color = new Color(0.35f, 0.22f, 0.15f); break;
+                case "entrance.canopy": color = new Color(0.5f, 0.5f, 0.52f); break;
+                case "tree.trunk": color = new Color(0.4f, 0.28f, 0.18f); break;
+                case "tree.canopy": color = new Color(0.22f, 0.5f, 0.22f); break;
+                case "detail.glass": color = new Color(0.55f, 0.72f, 0.88f); break;
+                case "detail.concrete": color = new Color(0.75f, 0.75f, 0.73f); break;
+                case "detail.seam": color = new Color(0.45f, 0.44f, 0.42f); break;
+                case "detail.roof.flat": color = new Color(0.32f, 0.32f, 0.34f); break;
+                case "detail.roof.pitched": color = new Color(0.5f, 0.25f, 0.18f); break;
+                case QuarterObjectTypes.Swing: color = new Color(0.7f, 0.3f, 0.25f); break;
+                case QuarterObjectTypes.Sandbox: color = new Color(0.9f, 0.78f, 0.5f); break;
+                case QuarterObjectTypes.Urn: color = new Color(0.3f, 0.4f, 0.32f); break;
+                case QuarterObjectTypes.TrashContainer: color = new Color(0.28f, 0.42f, 0.3f); break;
+                case QuarterObjectTypes.Bush: color = new Color(0.28f, 0.55f, 0.28f); break;
+                case QuarterObjectTypes.Footpath: color = new Color(0.68f, 0.66f, 0.6f); break;
+                case QuarterObjectTypes.BasementFloor:
+                case QuarterObjectTypes.BasementCeiling:
+                case QuarterObjectTypes.BasementWall: color = new Color(0.52f, 0.52f, 0.5f); break; // бетон
+                case QuarterObjectTypes.BasementStep: color = new Color(0.58f, 0.58f, 0.56f); break;
+                case QuarterObjectTypes.BasementDoor: color = new Color(0.55f, 0.3f, 0.16f); break; // ржавое железо
+                case QuarterObjectTypes.BasementSecondDoor: color = new Color(0.35f, 0.35f, 0.38f); break;
+                case QuarterObjectTypes.BasementShelf: color = new Color(0.45f, 0.48f, 0.52f); break; // металл
+                case QuarterObjectTypes.BasementCrate: color = new Color(0.6f, 0.45f, 0.28f); break; // дерево
+                case QuarterObjectTypes.BasementTable: color = new Color(0.5f, 0.38f, 0.24f); break;
+                case QuarterObjectTypes.BasementChair: color = new Color(0.45f, 0.33f, 0.2f); break;
+                case QuarterObjectTypes.BasementPipe: color = new Color(0.4f, 0.42f, 0.45f); break;
+                case QuarterObjectTypes.BasementLamp: color = new Color(0.9f, 0.75f, 0.4f); break; // тусклый тёплый
+                case QuarterObjectTypes.BasementPoint: color = new Color(0.85f, 0.3f, 0.25f); break;
                 case QuarterObjectTypes.Crosswalk:
                 case QuarterObjectTypes.CenterLine:
                 case QuarterObjectTypes.StopLine:
@@ -196,11 +560,83 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 default: color = Color.magenta; break; // неизвестный тип виден сразу
             }
 
-            // Shader.Find("Universal Render Pipeline/Lit") — для URP; в Built-in проекте заменить на "Standard".
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-            var material = new Material(shader) { color = color };
+            var material = CreateMaterial(color);
             _materials[typeId] = material;
             return material;
         }
+    }
+
+    /// <summary>
+    /// Железная дверь подвала (точка взаимодействия basement.door).
+    /// Состояния ведёт BasementDoorController из ядра генератора
+    /// (Closed/Open/Locked); этот компонент только плавно поворачивает
+    /// дверь на петлях (родитель-пивот стоит на кромке петли, коллайдер
+    /// едет вместе со створкой). Взаимодействие дёргает будущий код игрока:
+    /// if (door.Interact()) { /* дверь открылась или закрылась */ }
+    /// Locked-дверь Interact() не откроет — сначала Unlock() (ключ/сюжет).
+    ///
+    /// ВАЖНО: в Play Mode не проверялось (Unity в репозитории нет).
+    /// </summary>
+    public sealed class BasementDoor : MonoBehaviour
+    {
+        [SerializeField] private float openAngle = -105f;
+        [SerializeField] private float speed = 6f;
+
+        private BasementDoorController _controller;
+        private float _currentAngle;
+
+        public BasementDoorState State => _controller != null ? _controller.State : BasementDoorState.Locked;
+        public bool IsOpen => _controller != null && _controller.IsOpen;
+
+        internal void Configure(BasementDoorController controller)
+        {
+            _controller = controller ?? throw new System.ArgumentNullException(nameof(controller));
+            _currentAngle = _controller.IsOpen ? openAngle : 0f;
+            ApplyAngle();
+        }
+
+        /// <summary>Точка взаимодействия: открыть/закрыть. Locked возвращает false.</summary>
+        public bool Interact()
+        {
+            EnsureController();
+            return _controller.Toggle();
+        }
+
+        public bool Unlock()
+        {
+            EnsureController();
+            return _controller.Unlock();
+        }
+
+        public bool Lock()
+        {
+            EnsureController();
+            return _controller.Lock();
+        }
+
+        private void EnsureController()
+        {
+            if (_controller == null)
+                _controller = new BasementDoorController(BasementDoorState.Locked);
+        }
+
+        private void Update()
+        {
+            float target = IsOpen ? openAngle : 0f;
+            if (Mathf.Abs(target - _currentAngle) < 0.05f) return;
+            _currentAngle = Mathf.Lerp(_currentAngle, target, Time.deltaTime * speed);
+            ApplyAngle();
+        }
+
+        private void ApplyAngle()
+        {
+            // Пивот уже повёрнут по RotationY двери из плана; добавляем угол открытия вокруг Y.
+            // Базовый поворот пивота храним первым кадром через localRotation при создании,
+            // поэтому храним его отдельно.
+            if (_baseRotation == null) _baseRotation = transform.localRotation;
+            transform.localRotation = _baseRotation.Value * Quaternion.Euler(0f, _currentAngle, 0f);
+        }
+
+        private Quaternion? _baseRotation;
     }
 }

@@ -25,7 +25,7 @@ namespace LifeFromZero.City.Quarter.Tests
             suite.Add("Перекрёстков 9, у каждого — переходы и стоп-линии", IntersectionsAndCrosswalks);
             suite.Add("Тротуары идут вдоль каждой улицы с двух сторон", SidewalksAlongRoads);
             suite.Add("Дорожная разметка: осевой пунктир присутствует и не заходит на перекрёстки", CenterLineMarkings);
-            suite.Add("Дома пятиэтажные, стоят внутри квартала", BuildingsAreFiveStorey);
+            suite.Add("Дома разной этажности (3/5/10), пятиэтажки преобладают, высота = этажи × высота этажа", BuildingsMixedHeights);
             suite.Add("Дома не пересекают проезжую часть и тротуары", BuildingsAvoidRoadCorridors);
             suite.Add("Дома не пересекаются друг с другом", BuildingsDoNotOverlap);
             suite.Add("У каждого дома есть подъезды у фасада", BuildingsHaveEntrances);
@@ -135,16 +135,29 @@ namespace LifeFromZero.City.Quarter.Tests
 
         // ---------- дома ----------
 
-        private static void BuildingsAreFiveStorey()
+        private static void BuildingsMixedHeights()
         {
             QuarterPlan plan = Plan();
             IsTrue(plan.Buildings.Count >= 20, "Домов должно быть не меньше 20, фактически: " + plan.Buildings.Count);
+            int c3 = 0, c5 = 0, c10 = 0;
             foreach (BuildingInfo b in plan.Buildings)
             {
-                AreEqual(5, b.Floors, "Дом " + b.Id + " — пятиэтажный по ТЗ");
-                AreEqual(15f, b.Size.Y, "Высота дома " + b.Id + " = 5 этажей × 3 м");
-                IsTrue(b.Size.X >= 30f && b.Size.X <= 42f, "Длина корпуса " + b.Id + " в пределах архетипа");
+                IsTrue(b.Floors == 3 || b.Floors == 5 || b.Floors == 10,
+                    "Дом " + b.Id + ": этажность 3/5/10, фактически " + b.Floors);
+                // Реальная высота здания соответствует этажности (2.8–3.2 м на этаж).
+                float perFloor = b.Size.Y / b.Floors;
+                IsTrue(perFloor >= 2.8f && perFloor <= 3.2f,
+                    "Дом " + b.Id + ": высота этажа " + perFloor);
+                if (b.Floors == 3) c3++; else if (b.Floors == 5) c5++; else c10++;
+                // Стиль и крыша согласованы с этажностью по архетипам по умолчанию.
+                if (b.Floors == 3) { AreEqual("brick", b.FacadeStyle, "Трёхэтажка — кирпич"); AreEqual("pitched", b.RoofType, "Трёхэтажка — скатная крыша"); }
+                if (b.Floors == 5) { AreEqual("panel", b.FacadeStyle, "Пятиэтажка — панель"); }
+                if (b.Floors == 10) { AreEqual("modern", b.FacadeStyle, "Десятиэтажка — современная"); }
+                IsTrue(!string.IsNullOrEmpty(b.FacadeColor), "Дом " + b.Id + ": задан цвет фасада");
             }
+            IsTrue(c3 >= 1 && c5 >= 1 && c10 >= 1,
+                "При seed=1904 нужны все три типа: 3эт=" + c3 + ", 5эт=" + c5 + ", 10эт=" + c10);
+            IsTrue(c5 > c3 && c5 > c10, "Пятиэтажки преобладают: 5эт=" + c5 + " из " + plan.Buildings.Count);
         }
 
         private static void BuildingsAvoidRoadCorridors()
