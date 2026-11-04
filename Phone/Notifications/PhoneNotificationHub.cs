@@ -1,6 +1,7 @@
 // Life From Zero — Phone notifications (ТЗ №014-Т.1)
 // Namespace: LifeFromZero.Phone.Notifications
 
+using System;
 using LifeFromZero.Phone.Apps;
 using LifeFromZero.Phone.Core;
 
@@ -62,6 +63,25 @@ namespace LifeFromZero.Phone.Notifications
 
         public IPhoneNotificationService Notifications => _notifications;
 
+        /// <summary>
+        /// Увеличивает бейдж приложения, подавляя любые исключения реестра.
+        /// Кастомный реестр может упасть, в том числе упаковав ошибку в
+        /// <see cref="AggregateException"/> (например, при вызове через Task/UniTask):
+        /// без перехвата уведомление уже создано, но вызывающий код получил бы исключение
+        /// и мог бы попытаться повторить Push (двойной бейдж).
+        /// </summary>
+        private void FailSafeAddUnread(string appId, int delta)
+        {
+            try
+            {
+                _apps.AddUnread(appId, delta);
+            }
+            catch (Exception)
+            {
+                // Бейдж вспомогательный: состояние приложения его не теряет.
+            }
+        }
+
         public PhoneResult Push(
             string id,
             string source,
@@ -90,7 +110,7 @@ namespace LifeFromZero.Phone.Notifications
             // уведомление и не превращает успех в ошибку.
             // Результат намеренно не пробрасывается: бейдж вспомогательный.
             // TODO(Codex): при необходимости логировать код ответа реестра здесь.
-            _ = _apps.AddUnread(appId, 1);
+            FailSafeAddUnread(appId, 1);
 
             return added;
         }

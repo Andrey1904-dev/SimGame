@@ -284,5 +284,44 @@ namespace LifeFromZero.Phone.Messages
             _order.Add(conversation);
             return conversation;
         }
+
+        /// <summary>
+        /// Полностью заменяет содержимое сервиса готовыми переписками.
+        /// Вызывается только <see cref="PhoneMessagesRestore"/> после собственной проверки
+        /// снимка. Намеренно <c>internal</c>: внешний код не может подсунуть сюда
+        /// несогласованный набор и обойти дедупликацию ID.
+        /// </summary>
+        internal void ReplaceAll(IReadOnlyList<PhoneConversation> conversations)
+        {
+            if (conversations == null)
+            {
+                throw new ArgumentNullException(nameof(conversations));
+            }
+
+            _conversations.Clear();
+            _order.Clear();
+            _messageIds.Clear();
+
+            for (int i = 0; i < conversations.Count; i++)
+            {
+                PhoneConversation conversation = conversations[i];
+
+                if (conversation == null || _conversations.ContainsKey(conversation.ConversationId))
+                {
+                    throw new PhoneIntegrationException(
+                        "Повреждённый набор переписок при восстановлении: " + (conversation == null ? "<null>" : conversation.ConversationId));
+                }
+
+                _conversations.Add(conversation.ConversationId, conversation);
+                _order.Add(conversation);
+
+                for (int j = 0; j < conversation.Messages.Count; j++)
+                {
+                    // Индекс ID восстанавливается вместе с данными: иначе новая переписка
+                    // получила бы ID, уже занятый загруженным сообщением.
+                    _messageIds.Add(conversation.Messages[j].Id);
+                }
+            }
+        }
     }
 }

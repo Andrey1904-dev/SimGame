@@ -42,6 +42,14 @@ namespace LifeFromZero.Phone.Tests
             suite.Add("Сообщения: PhoneInbox для внешних систем", Inbox);
             suite.Add("Сообщения: валидация модели сообщения", MessageModelValidation);
             suite.Add("Сообщения: входящие и исходящие различимы", DirectionBasics);
+
+            // Регрессионные тесты аудита ТЗ №015 (восстановление из сохранения).
+            suite.Add("Сообщения: восстановление из снимка", RestoreFromSnapshot);
+            suite.Add("Сообщения: после восстановления ID сообщений не конфликтуют", RestoreKeepsIdSpace);
+            suite.Add("Сообщения: пустой снимок восстанавливается", RestoreEmptySnapshot);
+            suite.Add("Сообщения: дубли ID в снимке отклоняются", RestoreRejectsDuplicateIds);
+            suite.Add("Сообщения: битый снимок не меняет сервис", RestoreRejectsBrokenSnapshot);
+            suite.Add("Сообщения: снимок защищён от мутации вызывающим кодом", SnapshotIsDefensiveCopy);
         }
 
         private static IPhoneMessageService NewService()
@@ -377,6 +385,182 @@ namespace LifeFromZero.Phone.Tests
 
             var outgoing = new PhoneMessage("id", Anna, PhoneMessageDirection.Outgoing, "X", GameMinutes.Unknown, false);
             MiniTestRunner.IsTrue(outgoing.IsRead, "исходящее принудительно прочитано");
+        }
+
+        // ---------- Восстановление из сохранения (ТЗ №015) ----------
+
+        private static void RestoreFromSnapshot()
+        {
+            var source = new PhoneMessageService();
+            var clock = new FakePhoneClock(10d);
+            source.ReceiveFromContact(Anna, "Первое", clock);
+            clock.Advance(5d);
+            source.SendFromPlayer(Anna, "Ответ", clock);
+            source.ReceiveFromContact(Boris, "Второе", clock);
+            source.MarkRead(Anna, source.GetHistory(Anna).Value[0].Id);
+
+            PhoneMessagesSnapshot snapshot = source.CreateSnapshot();
+
+            var target = new PhoneMessageService();
+            string error;
+            PhoneResult restored = PhoneMessagesRestore.RestoreInto(target, snapshot, out error);
+
+            MiniTestRunner.IsTrue(restored.IsSuccess, "снимок восстановлен: " + error);
+            MiniTestRunner.AreEqual(2, target.Conversations.Count, "две переписки");
+            MiniTestRunner.AreEqual(3, target.GetHistory(Anna).Value.Count + target.GetHistory(Boris).Value.Count, "три сообщения");
+            MiniTestRunner.AreEqual(1, target.TotalUnread, "непрочитанных ровно одно (входящее у Бориса)");
+
+            IReadOnlyList<PhoneMessage> annaHistory = target.GetHistory(Anna).Value;
+            MiniTestRunner.IsTrue(annaHistory[0].IsRead, "статус прочтения восстановлен");
+            MiniTestRunner.AreEqual("Ответ", annaHistory[1].Text, "текст восстановлен");
+            MiniTestRunner.AreEqual(PhoneMessageDirection.Outgoing, annaHistory[1].Direction, "направление восстановлено");
+            MiniTestRunner.AreEqual(15d, annaHistory[1].SentAt.Minutes, "время восстановлено");
+            MiniTestRunner.AreEqual(Anna, annaHistory[1].ConversationId, "привязка к переписке восстановлена");
+        }
+
+        /// <summary>
+        /// После восстановления новые сообщения не должны получить ID, занятый загруженными:
+        /// иначе MarkRead мог бы «прочитать» не то сообщение.
+        /// </summary>
+        private static void RestoreKeepsIdSpace()
+        {
+            var source = new PhoneMessageService();
+            var clock = new FakePhoneClock(0d);
+            source.ReceiveFromContact(Anna, "Старое", clock);
+
+            var target = new PhoneMessageService();
+            string error;
+            PhoneMessagesRestore.RestoreInto(target, source.CreateSnapshot(), out error);
+
+            target.ReceiveFromContact(Anna, "Новое", clock);
+            IReadOnlyList<PhoneMessage> history = target.GetHistory(Anna).Value;
+
+            MiniTestRunner.AreEqual(2, history.Count, "два сообщения");
+            MiniTestRunner.IsTrue(history[0].Id != history[1].Id, "ID не совпадают после восстановления");
+            MiniTestRunner.AreEqual(2, target.TotalUnread, "оба сообщения непрочитаны");
+        }
+
+        private static void RestoreEmptySnapshot()
+        {
+            var target = new PhoneMessageService();
+            var clock = new FakePhoneClock(0d);
+            target.ReceiveFromContact(Anna, "Будет стёрто", clock);
+
+            string error;
+            PhoneResult restored = PhoneMessagesRestore.RestoreInto(target, new PhoneMessagesSnapshot(null), out error);
+
+            MiniTestRunner.IsTrue(restored.IsSuccess, "пустой снимок — валидный: " + error);
+            MiniTestRunner.AreEqual(0, target.Conversations.Count, "сервис очищен");
+            MiniTestRunner.AreEqual(0, target.TotalUnread, "счётчик обнулён");
+        }
+
+        private static void RestoreRejectsDuplicateIds()
+        {
+            var target = new PhoneMessageService();
+            var clock = new FakePhoneClock(0d);
+            target.ReceiveFromContact(Boris, "Существующее", clock);
+
+            var duplicatedMessages = new List<PhoneMessageSnapshot>
+            {
+                new PhoneMessageSnapshot("m1", Anna, PhoneMessageDirection.Incoming, "Раз", GameMinutes.FromMinutes(1d), false),
+                new PhoneMessageSnapshot("m1", Anna, PhoneMessageDirection.Incoming, "Два", GameMinutes.FromMinutes(2d), false)
+            };
+
+            var snapshot = new PhoneMessagesSnapshot(new List<PhoneConversationSnapshot>
+            {
+                new PhoneConversationSnapshot(Anna, duplicatedMessages)
+            });
+
+            string error;
+            PhoneResult restored = PhoneMessagesRestore.RestoreInto(target, snapshot, out error);
+
+            MiniTestRunner.AreEqual(PhoneResultCode.DuplicateId, restored.Code, "дубль ID сообщения отклонён");
+            MiniTestRunner.IsTrue(error != null, "причина сообщена");
+            MiniTestRunner.AreEqual(1, target.GetHistory(Boris).Value.Count, "сервис не изменился");
+
+            var duplicatedConversations = new PhoneMessagesSnapshot(new List<PhoneConversationSnapshot>
+            {
+                new PhoneConversationSnapshot(Anna, new List<PhoneMessageSnapshot>()),
+                new PhoneConversationSnapshot(Anna, new List<PhoneMessageSnapshot>())
+            });
+
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.DuplicateId,
+                PhoneMessagesRestore.RestoreInto(target, duplicatedConversations, out error).Code,
+                "дубль переписки отклонён");
+        }
+
+        private static void RestoreRejectsBrokenSnapshot()
+        {
+            var target = new PhoneMessageService();
+            var clock = new FakePhoneClock(0d);
+            target.ReceiveFromContact(Anna, "Живое сообщение", clock);
+
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.InvalidArgument,
+                PhoneMessagesRestore.RestoreInto(target, null, out string errorNull).Code,
+                "null-снимок отклонён");
+
+            var wrongConversation = new PhoneMessagesSnapshot(new List<PhoneConversationSnapshot>
+            {
+                new PhoneConversationSnapshot(Anna, new List<PhoneMessageSnapshot>
+                {
+                    new PhoneMessageSnapshot("m1", Boris, PhoneMessageDirection.Incoming, "Текст", GameMinutes.Unknown, false)
+                })
+            });
+
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.InvalidArgument,
+                PhoneMessagesRestore.RestoreInto(target, wrongConversation, out string errorWrong).Code,
+                "сообщение из чужой переписки отклонено");
+
+            var outgoingUnread = new PhoneMessagesSnapshot(new List<PhoneConversationSnapshot>
+            {
+                new PhoneConversationSnapshot(Anna, new List<PhoneMessageSnapshot>
+                {
+                    new PhoneMessageSnapshot("m1", Anna, PhoneMessageDirection.Outgoing, "Текст", GameMinutes.Unknown, false)
+                })
+            });
+
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.InvalidState,
+                PhoneMessagesRestore.RestoreInto(target, outgoingUnread, out string errorOutgoing).Code,
+                "непрочитанное исходящее отклонено");
+
+            var emptyText = new PhoneMessagesSnapshot(new List<PhoneConversationSnapshot>
+            {
+                new PhoneConversationSnapshot(Anna, new List<PhoneMessageSnapshot>
+                {
+                    new PhoneMessageSnapshot("m1", Anna, PhoneMessageDirection.Incoming, "   ", GameMinutes.Unknown, false)
+                })
+            });
+
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.InvalidArgument,
+                PhoneMessagesRestore.RestoreInto(target, emptyText, out string errorEmpty).Code,
+                "пустой текст отклонён");
+
+            // Ни один из отклонённых снимков не должен был тронуть живые данные.
+            MiniTestRunner.AreEqual(1, target.Conversations.Count, "переписка не подменена");
+            MiniTestRunner.AreEqual(1, target.GetHistory(Anna).Value.Count, "сообщение не потеряно");
+            MiniTestRunner.AreEqual(1, target.TotalUnread, "счётчик не сброшен");
+        }
+
+        private static void SnapshotIsDefensiveCopy()
+        {
+            var list = new List<PhoneMessageSnapshot>
+            {
+                new PhoneMessageSnapshot("m1", Anna, PhoneMessageDirection.Incoming, "Текст", GameMinutes.FromMinutes(1d), false)
+            };
+
+            var snapshot = new PhoneMessagesSnapshot(new List<PhoneConversationSnapshot>
+            {
+                new PhoneConversationSnapshot(Anna, list)
+            });
+
+            list.Clear();
+
+            MiniTestRunner.AreEqual(1, snapshot.Conversations[0].Messages.Count, "снимок не зависит от списка вызывающего кода");
         }
 
         private static void DirectionBasics()

@@ -25,7 +25,7 @@
 | `Jobs/Delivery/IDeliveryService.cs` | `Assets/Jobs/Delivery/IDeliveryService.cs` | Контракт сервиса |
 | `Jobs/Delivery/DeliveryService.cs` | `Assets/Jobs/Delivery/DeliveryService.cs` | Реализация |
 | `Jobs/Tests/Jobs.Tests.asmdef` | `Assets/Jobs/Tests/Jobs.Tests.asmdef` | Тестовая сборка (Editor) |
-| `Jobs/Tests/DeliveryServiceTests.cs` | `Assets/Jobs/Tests/DeliveryServiceTests.cs` | 31 тест |
+| `Jobs/Tests/DeliveryServiceTests.cs` | `Assets/Jobs/Tests/DeliveryServiceTests.cs` | 40 тестов |
 | `Jobs/Tests/MiniTestRunner.cs` | `Assets/Jobs/Tests/MiniTestRunner.cs` | Раннер без пакетов |
 | `Jobs/Tests/JobsNUnitTests.cs` | `Assets/Jobs/Tests/JobsNUnitTests.cs` | NUnit-обёртка (опционально) |
 | `Jobs/Tests/Fakes/FakeAdapters.cs` | `Assets/Jobs/Tests/Fakes/FakeAdapters.cs` | Тестовые адаптеры |
@@ -271,7 +271,7 @@ cd Jobs/Tests
 dotnet run --project Console.csproj
 ```
 
-Ожидаемо: **31 тест**, все PASS (фактически не проверялось — см. п.8).
+Ожидаемо: **40 тестов**, все PASS (фактически не проверялось — см. п.8).
 
 ---
 
@@ -290,7 +290,7 @@ dotnet run --project Console.csproj
 | Чистый C#, без UI/MonoBehaviour | asmdef `noEngineReferences`, нет Unity API |
 | Свои MoneyWallet/GameClock/перемещение не создаются | только `Adapters.cs` (интерфейсы) |
 | Независимость от магазина | нет ссылок на `Economy/` |
-| Тесты: успех, просрочка, двойная выплата, неверная точка, отмена, исключения | `Tests/DeliveryServiceTests.cs` (31 кейс) |
+| Тесты: успех, просрочка, двойная выплата, неверная точка, отмена, исключения | `Tests/DeliveryServiceTests.cs` (40 кейсов) |
 
 ---
 
@@ -299,7 +299,9 @@ dotnet run --project Console.csproj
 ### Не проверено (главное)
 
 1. **Компиляция не выполнялась** — в среде не было Unity/.NET SDK. Возможны опечатки,
-   неверные `using`, несоответствия версии языка.
+   неверные `using`, несоответствия версии языка. Аудит ТЗ №015 добавил статическую
+   проверку контрактов (`INTEGRATION_AUDIT.md`, §2) и исправил два дефекта `Accept`
+   (порядок проверок, «зависший» слот); см. §17a ниже.
 2. **Тесты не запускались** — «31 PASS» это расчёт, а не результат.
 3. **asmdef-ссылки** (`UnityEngine.TestRunner`, `UnityEditor.TestRunner`,
    `nunit.framework.dll`) не сверялись с реальным проектом.
@@ -340,6 +342,10 @@ dotnet run --project Console.csproj
     (в адаптере), сам модуль менять не нужно.
 16. **Заказы хранятся в памяти** (`Dictionary` + `List`). Сохранение/загрузка, генерация
     заказов, несколько курьеров, штрафы — вне ТЗ.
+17a. **Порядок проверок `Accept`** (аудит ТЗ №015): сначала состояние заказа
+    (`InvalidState`), затем чужой активный заказ (`AlreadyHasActiveOrder`), затем просрочка
+    (`Failed`). Так неудачная попытка взять второй заказ не переводит проверяемый заказ
+    в `Failed`. Слот активного заказа всегда сверяется с фактическими состояниями заказов.
 17. **Все операции синхронные и однопоточные**: предполагается вызов из главного потока Unity.
     Потокобезопасность не реализована.
 

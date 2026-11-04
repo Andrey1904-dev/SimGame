@@ -26,7 +26,8 @@ Phone/
 │   ├── PhoneMessage.cs              сообщение (входящее/исходящее, время, прочтение)
 │   ├── PhoneConversation.cs         переписка с контактом
 │   ├── PhoneMessageService.cs       сервис переписок и истории
-│   ├── PhoneMessagesSnapshot.cs     DTO для будущего сохранения
+│   ├── PhoneMessagesSnapshot.cs     DTO для сохранения
+│   ├── PhoneMessagesRestore.cs      восстановление из снимка с валидацией (ТЗ №015)
 │   └── PhoneInbox.cs                узкий вход для NPC/сюжета
 ├── Contacts/
 │   ├── PhoneContact.cs              контакт
@@ -36,13 +37,14 @@ Phone/
 │   ├── PhoneNotificationService.cs  сервис с дедупликацией
 │   ├── PhoneNotificationsSnapshot.cs DTO для сохранения
 │   ├── PhoneNotificationHub.cs      фасад для внешних систем + бейджи
+│   ├── PhoneNotificationsRestore.cs восстановление уведомлений (ТЗ №015)
 │   └── ExternalAdapters.cs          IBalanceSource, IDeliveryJobsSource, IDebtsSource, IStorySource
 ├── Integrations/
 │   ├── BankSummaryService.cs        экран «Банк» (только чтение)
 │   ├── WorkSummaryService.cs        экран «Работа» (только чтение)
 │   ├── StorySummaryService.cs       сюжетные записи (только чтение)
 │   └── PhoneFacade.cs               сборка всех сервисов
-├── Tests/                           79 тестов + раннер + NUnit-обёртка + Console.csproj
+├── Tests/                           90 тестов + раннер + NUnit-обёртка + Console.csproj
 ├── README.md
 └── INTEGRATION.md                   инструкция для Codex
 ```
@@ -59,7 +61,9 @@ Phone/
 * **Счётчики защищены от переполнения** (`CounterOverflow`), суммарные счётчики насыщаются
   на `int.MaxValue`.
 * **Сохранение игры**: `CreateSnapshot()` у сообщений и уведомлений возвращает
-  иммутабельные DTO без поведения.
+  иммутабельные DTO (защитная копия списков) без поведения; загрузка —
+  `PhoneMessagesRestore.RestoreInto` / `PhoneNotificationsRestore.RestoreInto`
+  с полной валидацией и атомарной заменой (аудит ТЗ №015).
 
 ## Проверки
 
@@ -67,3 +71,6 @@ Phone/
 компиляторов запрещена). Инструментально проверено: синтаксис всех 34 `.cs`
 парсером C# (tree-sitter, 0 ошибок), валидность asmdef-JSON, регистрация всех 79 тестов,
 отсутствие ссылок на `Economy/` и `Jobs/`. Детали — в `INTEGRATION.md`.
+Аудит ТЗ №015 (`../INTEGRATION_AUDIT.md`): добавлено восстановление из сохранения,
+защитные копии снимков, устойчивость бейджей к сбою реестра и фильтрация null
+из внешних источников; тестов стало 90.

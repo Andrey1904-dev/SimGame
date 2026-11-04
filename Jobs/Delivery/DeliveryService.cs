@@ -20,6 +20,11 @@ namespace LifeFromZero.Jobs.Delivery
     /// заказ остаётся в PickedUp, выплата не считается сделанной — повторный вызов Complete
     /// может начислить деньги позже. Флаг <see cref="DeliveryStatus.PayoutGranted"/> гарантирует,
     /// что при успехе начисление происходит ровно один раз.
+    ///
+    /// Слот активного заказа (<see cref="ActiveOrderId"/>) — производная величина от состояний
+    /// заказов, а не независимое поле: при приёме он сверяется с <see cref="FindActiveEntry"/>.
+    /// Поэтому «зависший» слот не блокирует игру, а второй активный заказ, появившийся после
+    /// ручной правки состояния или будущей загрузки сохранения, не теряется.
     /// </remarks>
     public sealed class DeliveryService : IDeliveryService
     {
@@ -111,22 +116,35 @@ namespace LifeFromZero.Jobs.Delivery
                     DeliveryResultCode.OrderNotFound, NotFoundStatus(), now);
             }
 
-            // Просроченный (в том числе ещё не принятый) заказ нельзя принять — фиксируем провал.
-            if (IsOpen(entry.State) && IsExpired(entry, now))
-            {
-                return Fail(entry, now);
-            }
-
+            // Порядок проверок важен: «не тот заказ» и «уже есть активный заказ» не должны
+            // менять состояние запрошенного заказа. Раньше просрочка обрабатывалась первой,
+            // и попытка взять второй заказ молча переводила Available-заказ в Failed —
+            // то есть операция с побочным эффектом отвечала причиной, к нему не относящейся.
             if (entry.State != DeliveryOrderState.Available)
             {
+                // В том числе повторное принятие того же заказа.
                 return DeliveryResult.Failure(
                     DeliveryResultCode.InvalidState, entry.ToStatus(), now);
             }
 
-            if (_activeOrderId != null)
+            OrderEntry active = FindActiveEntry();
+
+            if (active != null)
             {
+                // Слот всегда выводится из фактических состояний: если _activeOrderId потерялся
+                // (ручная правка состояния, будущая загрузка сохранения), он восстанавливается
+                // здесь же, поэтому «зависший» слот не может заблокировать игру навсегда.
+                _activeOrderId = active.Order.Id;
                 return DeliveryResult.Failure(
                     DeliveryResultCode.AlreadyHasActiveOrder, entry.ToStatus(), now);
+            }
+
+            _activeOrderId = null;
+
+            // Просроченный (в том числе ещё не принятый) заказ нельзя принять — фиксируем провал.
+            if (IsExpired(entry, now))
+            {
+                return Fail(entry, now);
             }
 
             entry.State = DeliveryOrderState.Accepted;
@@ -407,6 +425,7 @@ namespace LifeFromZero.Jobs.Delivery
                     DeliveryResultCode.OrderNotFound, NotFoundStatus(), double.NaN);
             }
 
+            SyncActiveSlot();
             return new DeliveryResult(DeliveryResultCode.Success, entry.ToStatus(), 0L, double.NaN);
         }
 
@@ -438,6 +457,38 @@ namespace LifeFromZero.Jobs.Delivery
             }
 
             return _orders.TryGetValue(orderId, out entry);
+        }
+
+        /// <summary>
+        /// Первый по порядку регистрации заказ в состоянии Accepted/PickedUp.
+        /// Используется для восстановления <see cref="_activeOrderId"/>: слот всегда
+        /// выводится из фактических состояний, поэтому его нельзя «потерять» или «подделать».
+        /// </summary>
+        private OrderEntry FindActiveEntry()
+        {
+            for (int i = 0; i < _orderList.Count; i++)
+            {
+                OrderEntry candidate;
+
+                if (_orders.TryGetValue(_orderList[i].Id, out candidate) && candidate.IsActive)
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Приводит <see cref="_activeOrderId"/> в соответствие с фактическими состояниями.
+        /// Возвращает идентификатор активного заказа (или null). Вызывается только из методов
+        /// чтения вроде <see cref="GetStatus"/> — бизнес-операции делают эту сверку сами.
+        /// </summary>
+        private string SyncActiveSlot()
+        {
+            OrderEntry active = FindActiveEntry();
+            _activeOrderId = active == null ? null : active.Order.Id;
+            return _activeOrderId;
         }
 
         /// <summary>Заказ ещё не закрыт: Available, Accepted или PickedUp.</summary>

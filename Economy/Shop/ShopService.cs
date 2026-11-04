@@ -2,6 +2,7 @@
 // Namespace: LifeFromZero.Economy.Shop
 
 using System;
+using System.Collections.Generic;
 using LifeFromZero.Economy.Core;
 
 namespace LifeFromZero.Economy.Shop
@@ -24,12 +25,24 @@ namespace LifeFromZero.Economy.Shop
     /// <item><see cref="IInventoryAdapter.TryAdd"/> — выдача предметов.</item>
     /// <item>Откат: возврат денег, если шаг 6 не удался.</item>
     /// </list>
-    /// Остаточный риск: если возврат денег не удался, состояние может остаться несогласованным;
-    /// сервис сообщает об этом кодом <see cref="EconomyResultCode.InternalError"/>.
+    /// Возврат денег при сбое выдачи — не «одна попытка», а журнал незавершённых компенсаций:
+    /// если списание прошло, а <see cref="IWalletAdapter.TryRefund"/> отказал или упал, операция
+    /// запоминается и повторяется при следующем вызове <see cref="Purchase"/> и в
+    /// <see cref="RetryPendingRefunds"/>. Без этого повторная покупка «теряла» бы деньги игрока
+    /// навсегда: адаптер кошелька не является журналом транзакций и сам себя не чинит.
+    /// Пока компенсация висит, новые покупки не выполняются (код
+    /// <see cref="EconomyResultCode.PendingRefund"/>): иначе игрок мог бы потратить уже
+    /// возвращённые деньги и получить перерасход.
     /// </remarks>
     public sealed class ShopService : IShopService
     {
         private readonly IShopCatalog _catalog;
+
+        /// <summary>
+        /// Журнал незавершённых возвратов: суммы, которые были списаны, но не вернулись
+        /// (возврат отказал или упал). Пока журнал не пуст, новые покупки не начинаются.
+        /// </summary>
+        private readonly List<Money> _pendingRefunds = new List<Money>();
 
         public ShopService(IShopCatalog catalog)
         {
@@ -37,6 +50,9 @@ namespace LifeFromZero.Economy.Shop
         }
 
         public IShopCatalog Catalog => _catalog;
+
+        /// <inheritdoc />
+        public int PendingRefundCount => _pendingRefunds.Count;
 
         public PurchaseResult Purchase(IWalletAdapter wallet, IInventoryAdapter inventory, PurchaseRequest request)
         {
@@ -49,6 +65,17 @@ namespace LifeFromZero.Economy.Shop
             if (inventory == null)
             {
                 throw new ShopServiceException("Не передан инвентарь (IInventoryAdapter). Покупка невозможна.");
+            }
+
+            // 0. Незавершённый возврат блокирует новые покупки: деньги уже списаны,
+            // но ещё не вернулись, и повторное списание сделало бы состояние неразрешимым.
+            // Сначала пытаемся закрыть долг кошелька — это единственный шанс его исправить.
+            FlushPendingRefunds(wallet);
+
+            if (_pendingRefunds.Count > 0)
+            {
+                return PurchaseResult.Failure(
+                    EconomyResultCode.PendingRefund, null, request.Quantity, Money.Zero);
             }
 
             // 1. Существование товара. Пустой идентификатор отсекаем до обращения к каталогу:
@@ -82,9 +109,10 @@ namespace LifeFromZero.Economy.Shop
 
         /// <summary>
         /// Покупка уже найденного товара. Вынесено отдельным методом, чтобы бизнес-правила
-        /// не смешивались с обработкой исключений каталога.
+        /// не смешивались с обработкой исключений каталога. Метод экземплярный, потому что
+        /// ведёт журнал незавершённых возвратов (<see cref="Compensate"/>).
         /// </summary>
-        private static PurchaseResult PurchaseKnownProduct(
+        private PurchaseResult PurchaseKnownProduct(
             IWalletAdapter wallet,
             IInventoryAdapter inventory,
             Product product,
@@ -175,20 +203,71 @@ namespace LifeFromZero.Economy.Shop
         /// по контракту не изменил состояние. Если адаптер нарушает контракт, сверка — его забота:
         /// магазин не списывает предметы наугад, чтобы не уничтожить уже лежащие у игрока.
         /// </summary>
-        private static PurchaseResult Compensate(
+        private PurchaseResult Compensate(
             IWalletAdapter wallet,
             Product product,
             int quantity,
             Money totalCost)
         {
+            // Возврат, который не удался, попадает в журнал и повторяется позже: деньги игрока
+            // не «сгорают» из-за одного отказа кошелька. Счётчик попыток — у адаптера внутри.
+            if (TryRefund(wallet, totalCost))
+            {
+                return PurchaseResult.Failure(
+                    EconomyResultCode.InventoryRejected, product, quantity, totalCost);
+            }
+
+            _pendingRefunds.Add(totalCost);
+
+            return PurchaseResult.Failure(
+                EconomyResultCode.InternalError, product, quantity, totalCost);
+        }
+
+        /// <summary>
+        /// Повторяет все незавершённые возвраты. Возвращает <c>true</c>, если журнал пуст
+        /// (в том числе если он был пуст изначально). Вызывается магазином автоматически
+        /// в начале каждой покупки; UI/загрузчик может звать явно, чтобы закрыть долг
+        /// до открытия витрины.
+        /// </summary>
+        public bool RetryPendingRefunds(IWalletAdapter wallet)
+        {
+            if (wallet == null)
+            {
+                throw new ShopServiceException("Не передан кошелёк (IWalletAdapter). Возврат невозможен.");
+            }
+
+            FlushPendingRefunds(wallet);
+            return _pendingRefunds.Count == 0;
+        }
+
+        /// <summary>
+        /// Пытается вернуть все суммы из журнала. Порядок — от старых к новым; каждая сумма
+        /// независима, поэтому частичный успех допустим (успешные удаляются из журнала).
+        /// </summary>
+        private void FlushPendingRefunds(IWalletAdapter wallet)
+        {
+            for (int i = 0; i < _pendingRefunds.Count; )
+            {
+                if (TryRefund(wallet, _pendingRefunds[i]))
+                {
+                    _pendingRefunds.RemoveAt(i);
+                }
+                else
+                {
+                    i++;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Одна попытка возврата. Исключение адаптера — такой же отказ, как и <c>false</c>.
+        /// </summary>
+        private static bool TryRefund(IWalletAdapter wallet, Money amount)
+        {
             bool refunded;
-            bool refundCallCompleted = SafeCall.Try(() => wallet.TryRefund(totalCost), out refunded);
+            bool completed = SafeCall.Try(() => wallet.TryRefund(amount), out refunded);
 
-            EconomyResultCode code = refundCallCompleted && refunded
-                ? EconomyResultCode.InventoryRejected
-                : EconomyResultCode.InternalError;
-
-            return PurchaseResult.Failure(code, product, quantity, totalCost);
+            return completed && refunded;
         }
 
         private static bool TryReadBalance(IWalletAdapter wallet, out Money balance)

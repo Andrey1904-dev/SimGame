@@ -54,7 +54,12 @@ namespace LifeFromZero.Phone.Messages
         public PhoneConversationSnapshot(string conversationId, IReadOnlyList<PhoneMessageSnapshot> messages)
         {
             ConversationId = conversationId;
-            Messages = messages ?? new List<PhoneMessageSnapshot>().AsReadOnly();
+
+            // Защитная копия: снимок не должен меняться, если вызывающий код продолжит
+            // редактировать свой список (иначе сохранение «поедет» после записи на диск).
+            Messages = messages == null
+                ? (IReadOnlyList<PhoneMessageSnapshot>)new List<PhoneMessageSnapshot>().AsReadOnly()
+                : new List<PhoneMessageSnapshot>(messages).AsReadOnly();
         }
     }
 
@@ -65,7 +70,9 @@ namespace LifeFromZero.Phone.Messages
 
         public PhoneMessagesSnapshot(IReadOnlyList<PhoneConversationSnapshot> conversations)
         {
-            Conversations = conversations ?? new List<PhoneConversationSnapshot>().AsReadOnly();
+            Conversations = conversations == null
+                ? (IReadOnlyList<PhoneConversationSnapshot>)new List<PhoneConversationSnapshot>().AsReadOnly()
+                : new List<PhoneConversationSnapshot>(conversations).AsReadOnly();
         }
     }
 }

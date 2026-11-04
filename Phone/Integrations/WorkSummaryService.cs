@@ -78,7 +78,52 @@ namespace LifeFromZero.Phone.Integrations
                 }
             }
 
+            if (available)
+            {
+                orders = RemoveNulls(orders);
+            }
+
             return PhoneResult<WorkSummary>.Ok(new WorkSummary(available, orders, activeId));
+        }
+
+        /// <summary>
+        /// Убирает пустые записи из ответа внешнего источника: телефон только отображает
+        /// заказы и не должен отдавать null в UI.
+        /// </summary>
+        private static DeliveryJobDto[] RemoveNulls(DeliveryJobDto[] source)
+        {
+            if (source == null)
+            {
+                return new DeliveryJobDto[0];
+            }
+
+            int count = 0;
+
+            for (int i = 0; i < source.Length; i++)
+            {
+                if (source[i] != null)
+                {
+                    count++;
+                }
+            }
+
+            if (count == source.Length)
+            {
+                return source;
+            }
+
+            var result = new DeliveryJobDto[count];
+            int index = 0;
+
+            for (int i = 0; i < source.Length; i++)
+            {
+                if (source[i] != null)
+                {
+                    result[index++] = source[i];
+                }
+            }
+
+            return result;
         }
     }
 }

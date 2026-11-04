@@ -55,6 +55,37 @@ namespace LifeFromZero.Phone.Integrations
         }
 
         /// <summary>Всегда успешно: недоступные части помечаются флагами.</summary>
+        private static DebtDto[] RemoveNulls(DebtDto[] source)
+        {
+            int count = 0;
+
+            for (int i = 0; i < source.Length; i++)
+            {
+                if (source[i] != null)
+                {
+                    count++;
+                }
+            }
+
+            if (count == source.Length)
+            {
+                return source;
+            }
+
+            var result = new DebtDto[count];
+            int index = 0;
+
+            for (int i = 0; i < source.Length; i++)
+            {
+                if (source[i] != null)
+                {
+                    result[index++] = source[i];
+                }
+            }
+
+            return result;
+        }
+
         public PhoneResult<BankSummary> GetSummary()
         {
             bool hasBalance = false;
@@ -93,6 +124,13 @@ namespace LifeFromZero.Phone.Integrations
                     hasDebts = false;
                     debts = new DebtDto[0];
                 }
+            }
+
+            // Источник может вернуть массив с пустыми записями: телефон не должен
+            // отдавать null в UI (там будет «долг без названия» вместо падения).
+            if (hasDebts && debts != null)
+            {
+                debts = RemoveNulls(debts);
             }
 
             var summary = new BankSummary(hasBalance, rubles, debts, hasDebts);

@@ -55,6 +55,16 @@ namespace LifeFromZero.Economy.Tests
             suite.Add("Money: умножение с переполнением", MoneyMultiplyOverflow);
             suite.Add("Сервис: без кошелька — ShopServiceException", ServiceRequiresWallet);
 
+            // Регрессионные тесты аудита ТЗ №015 (найденные дефекты).
+            suite.Add("Возврат: сбой возврата не теряет деньги — повтор закрывает долг", PendingRefundIsRetried);
+            suite.Add("Возврат: исключение возврата попадает в журнал", RefundExceptionIsJournaled);
+            suite.Add("Возврат: незакрытый долг блокирует новые покупки", PendingRefundBlocksPurchases);
+            suite.Add("Возврат: долг закрывается до покупки в том же вызове", PendingRefundIsClosedBeforePurchase);
+            suite.Add("Возврат: предметы не выдаются, если возврат денег не удался", NoItemsWithoutMoney);
+            suite.Add("Покупка: исключение чтения баланса", BalanceReadException);
+            suite.Add("Покупка: исключение каталога", CatalogThrows);
+            suite.Add("Покупка: повторные попытки не дублируют деньги и предметы", ManyRepeatedPurchases);
+
             return suite;
         }
 
@@ -463,6 +473,190 @@ namespace LifeFromZero.Economy.Tests
             MiniTestRunner.AreEqual(195L, normal.Rubles, "65 × 3");
 
             MiniTestRunner.IsFalse(Money.FromRubles(65L).TryMultiply(-1, out _), "отрицательное количество отклонено");
+        }
+
+        // ---------- Регрессия аудита ТЗ №015 ----------
+
+        /// <summary>
+        /// Дефект: при отказе возврата деньги «сгорали» навсегда — повторная покупка просто
+        /// списывала новую сумму, а списанная ранее не возвращалась.
+        /// Теперь сумма попадает в журнал и возвращается при следующем вызове.
+        /// </summary>
+        private static void PendingRefundIsRetried()
+        {
+            var wallet = new FakeWallet(1000L) { RefundFailuresRemaining = 1 };
+            var inventory = new FakeInventory { TryAddOverride = false };
+            var shop = new ShopService(ShopCatalog.CreateDefault());
+
+            PurchaseResult first = shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+
+            MiniTestRunner.AreEqual(EconomyResultCode.InternalError, first.Code, "возврат не удался");
+            MiniTestRunner.AreEqual(950L, wallet.Balance.Rubles, "деньги списаны и ещё не вернулись");
+            MiniTestRunner.AreEqual(1, shop.PendingRefundCount, "долг зафиксирован в журнале");
+
+            // Следующий вызов сначала закрывает долг, затем выполняет покупку.
+            inventory.TryAddOverride = null;
+            PurchaseResult second = shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+
+            MiniTestRunner.IsTrue(second.IsSuccess, "покупка после закрытия долга проходит");
+            MiniTestRunner.AreEqual(0, shop.PendingRefundCount, "журнал пуст");
+            MiniTestRunner.AreEqual(950L, wallet.Balance.Rubles, "1000 - 50 (первая компенсирована, вторая списана)");
+            MiniTestRunner.AreEqual(1, inventory.GetCount("bread"), "выдан ровно один хлеб");
+        }
+
+        private static void RefundExceptionIsJournaled()
+        {
+            var wallet = new FakeWallet(500L) { RefundThrowsRemaining = 1 };
+            var inventory = new FakeInventory { TryAddOverride = false };
+            var shop = new ShopService(ShopCatalog.CreateDefault());
+
+            PurchaseResult first = shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+            MiniTestRunner.AreEqual(EconomyResultCode.InternalError, first.Code, "исключение возврата => InternalError");
+            MiniTestRunner.AreEqual(1, shop.PendingRefundCount, "исключение тоже попадает в журнал");
+
+            MiniTestRunner.IsTrue(shop.RetryPendingRefunds(wallet), "повтор возврата успешен");
+            MiniTestRunner.AreEqual(500L, wallet.Balance.Rubles, "баланс восстановлен полностью");
+            MiniTestRunner.AreEqual(0, shop.PendingRefundCount, "журнал пуст");
+        }
+
+        private static void PendingRefundBlocksPurchases()
+        {
+            var wallet = new FakeWallet(1000L) { RefundFailuresRemaining = 1 };
+            var inventory = new FakeInventory { TryAddOverride = false };
+            var shop = new ShopService(ShopCatalog.CreateDefault());
+
+            shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+
+            // Пока долг висит, повторный TryRefund тоже отклоняется (RefundOverride).
+            wallet.RefundOverride = false;
+            PurchaseResult blocked = shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+
+            MiniTestRunner.AreEqual(EconomyResultCode.PendingRefund, blocked.Code, "покупки заблокированы до закрытия долга");
+            MiniTestRunner.AreEqual(950L, wallet.Balance.Rubles, "новых списаний не было");
+            MiniTestRunner.AreEqual(1, wallet.SpendCalls, "списание было только одно");
+            MiniTestRunner.AreEqual(0, inventory.GetCount("bread"), "предметы не выдавались");
+        }
+
+        private static void PendingRefundIsClosedBeforePurchase()
+        {
+            var wallet = new FakeWallet(1000L) { RefundFailuresRemaining = 1 };
+            var inventory = new FakeInventory { TryAddOverride = false };
+            var shop = new ShopService(ShopCatalog.CreateDefault());
+
+            shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+            inventory.TryAddOverride = null;
+
+            PurchaseResult after = shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+
+            MiniTestRunner.IsTrue(after.IsSuccess, "покупка после компенсации успешна");
+            MiniTestRunner.AreEqual(50L, after.TotalCost.Rubles, "хлеб по 50 ₽");
+            MiniTestRunner.AreEqual(950L, wallet.Balance.Rubles, "1000 - 50: первая покупка компенсирована, вторая списана");
+            MiniTestRunner.AreEqual(1, inventory.GetCount("bread"), "выдан один хлеб");
+            MiniTestRunner.AreEqual(0, shop.PendingRefundCount, "журнал пуст");
+        }
+
+        private static void NoItemsWithoutMoney()
+        {
+            var wallet = new FakeWallet(100L) { RefundFailuresRemaining = 5 };
+            var inventory = new FakeInventory { TryAddOverride = false };
+            var shop = new ShopService(ShopCatalog.CreateDefault());
+
+            shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+
+            MiniTestRunner.AreEqual(50L, wallet.Balance.Rubles, "деньги списаны");
+            MiniTestRunner.AreEqual(0, inventory.GetCount("bread"), "предметы не выданы");
+            MiniTestRunner.AreEqual(1, shop.PendingRefundCount, "ровно один долг, не несколько");
+
+            // Повторные неудачные попытки не размножают долг.
+            shop.RetryPendingRefunds(wallet);
+            shop.RetryPendingRefunds(wallet);
+            MiniTestRunner.AreEqual(1, shop.PendingRefundCount, "долг не дублируется");
+        }
+
+        private static void BalanceReadException()
+        {
+            var wallet = new ThrowingBalanceWallet();
+            var inventory = new FakeInventory();
+            IShopService shop = new ShopService(ShopCatalog.CreateDefault());
+
+            PurchaseResult result = shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+
+            MiniTestRunner.AreEqual(EconomyResultCode.InternalError, result.Code, "сбой чтения баланса => InternalError");
+            MiniTestRunner.AreEqual(0, wallet.SpendCalls, "списание не выполнялось");
+            MiniTestRunner.AreEqual(0, inventory.TryAddCalls, "выдача не выполнялась");
+        }
+
+        private static void CatalogThrows()
+        {
+            var wallet = new FakeWallet(1000L);
+            var inventory = new FakeInventory();
+            IShopService shop = new ShopService(new ThrowingCatalog());
+
+            PurchaseResult result = shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+
+            MiniTestRunner.AreEqual(EconomyResultCode.InternalError, result.Code, "исключение каталога => InternalError");
+            MiniTestRunner.AreEqual(1000L, wallet.Balance.Rubles, "баланс не изменён");
+        }
+
+        private static void ManyRepeatedPurchases()
+        {
+            var wallet = new FakeWallet(50L * 10L);
+            var inventory = new FakeInventory();
+            var shop = new ShopService(ShopCatalog.CreateDefault());
+
+            int successes = 0;
+            int failures = 0;
+
+            for (int i = 0; i < 20; i++)
+            {
+                PurchaseResult result = shop.Purchase(wallet, inventory, new PurchaseRequest("bread", 1));
+
+                if (result.IsSuccess)
+                {
+                    successes++;
+                }
+                else
+                {
+                    failures++;
+                }
+            }
+
+            MiniTestRunner.AreEqual(10, successes, "ровно 10 успешных покупок");
+            MiniTestRunner.AreEqual(10, failures, "остальные 10 отклонены");
+            MiniTestRunner.AreEqual(0L, wallet.Balance.Rubles, "деньги израсходованы точно");
+            MiniTestRunner.AreEqual(10, inventory.GetCount("bread"), "предметов ровно 10, без дублей");
+            MiniTestRunner.AreEqual(0, shop.PendingRefundCount, "журнал компенсаций пуст");
+        }
+
+        /// <summary>Кошелёк, у которого чтение баланса всегда падает.</summary>
+        private sealed class ThrowingBalanceWallet : IWalletAdapter
+        {
+            public int SpendCalls { get; private set; }
+
+            public Money Balance => throw new InvalidOperationException("Тестовый сбой чтения баланса.");
+
+            public bool TrySpend(Money amount)
+            {
+                SpendCalls++;
+                return true;
+            }
+
+            public bool TryRefund(Money amount)
+            {
+                return true;
+            }
+        }
+
+        /// <summary>Каталог, который падает на любом поиске.</summary>
+        private sealed class ThrowingCatalog : IShopCatalog
+        {
+            public System.Collections.Generic.IReadOnlyList<Product> Products =>
+                new System.Collections.Generic.List<Product>().AsReadOnly();
+
+            public bool TryGet(string productId, out Product product)
+            {
+                throw new InvalidOperationException("Тестовый сбой каталога.");
+            }
         }
 
         private static void ServiceRequiresWallet()
