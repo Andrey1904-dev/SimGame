@@ -24,6 +24,9 @@ namespace LifeFromZero.City.Quarter.Tests
             suite.Add("Аудит: Id объектов/зданий/доставки уникальны, точки вне стен", UniqueIdsAcrossSeeds);
             suite.Add("Аудит: повторная генерация детерминирована и независима", RegenerationStable);
             suite.Add("Аудит: подвал — пол, ступени и лестница присутствуют как объекты", BasementPhysicalObjects);
+            suite.Add("Стресс: 118 seed (0, отрицательные, экстремальные) — состав и границы", StressManySeeds);
+            suite.Add("Стресс: ворота частных домов у улицы, а не в глубине блока", PrivateGatesNearStreet);
+            suite.Add("Стресс: невыполнимая конфигурация — понятная диагностика, не битый квартал", ImpossibleConfigDiagnosed);
             return suite;
         }
 
@@ -131,6 +134,98 @@ namespace LifeFromZero.City.Quarter.Tests
             QuarterPlan c = QuarterGenerator.Generate(1904);
             AreEqual(QuarterPlanSerializer.Serialize(a), QuarterPlanSerializer.Serialize(c),
                 "Генерация не зависит от предыдущих запусков (нет накопления состояния)");
+        }
+
+        private static void StressManySeeds()
+        {
+            // Воспроизводимый фиксированный список: обязательные seed из ТЗ,
+            // отрицательные и экстремальные значения + 100 вычисленных.
+            var seeds = new List<int>
+            {
+                0, 1, 2, 3, 7, 10, 99, 777, 1904, 31337,
+                -1, -7, -1904, -31337, int.MaxValue, int.MinValue, 2147483, -2147483,
+            };
+            for (int i = 0; i < 100; i++) seeds.Add(i * 7919 - 500000);
+            AreEqual(118, seeds.Count, "Стресс-список: 118 seed");
+            foreach (int seed in seeds)
+            {
+                QuarterPlan plan = QuarterGenerator.Generate(seed);
+                AreEqual(15, plan.Buildings.Count, "seed " + seed + ": ровно 15 жилых зданий");
+                var ids = new HashSet<string>();
+                foreach (PlacedObject o in plan.Objects)
+                {
+                    IsTrue(ids.Add(o.Id), "seed " + seed + ": Id уникален " + o.Id);
+                    IsTrue(o.Size.X > 0f && o.Size.Y > 0f && o.Size.Z > 0f,
+                        "seed " + seed + ": размеры " + o.Id + " положительны");
+                }
+                foreach (BuildingInfo b in plan.Buildings)
+                {
+                    Rect2 f = b.Footprint;
+                    IsTrue(f.MinX >= -0.01f && f.MaxX <= plan.Size + 0.01f &&
+                           f.MinZ >= -0.01f && f.MaxZ <= plan.Size + 0.01f,
+                        "seed " + seed + ": здание " + b.Id + " внутри квартала");
+                }
+                AreEqual(6, plan.Properties.Count, "seed " + seed + ": реестр из 6 записей");
+            }
+        }
+
+        private static void PrivateGatesNearStreet()
+        {
+            // Регрессия ТЗ №027: участок прижат к уличной стороне блока,
+            // ворота не дальше ~14 м от ближайшей улицы (тротуар+отступ).
+            foreach (int seed in new[] { 1904, 3, 7, 10, 777 })
+            {
+                QuarterPlan plan = QuarterGenerator.Generate(seed);
+                int gates = 0;
+                foreach (PlacedObject o in plan.Objects)
+                {
+                    if (o.TypeId != QuarterObjectTypes.PrivateGate) continue;
+                    gates++;
+                    float best = float.MaxValue;
+                    foreach (RoadSegment r in plan.Roads)
+                    {
+                        if (r.Kind != RoadKind.Street) continue;
+                        float cx = (r.Start.X + r.End.X) / 2f, cz = (r.Start.Z + r.End.Z) / 2f;
+                        float w = System.Math.Abs(r.End.X - r.Start.X) < 0.1f ? r.Width : System.Math.Abs(r.End.X - r.Start.X);
+                        float h = System.Math.Abs(r.End.Z - r.Start.Z) < 0.1f ? r.Width : System.Math.Abs(r.End.Z - r.Start.Z);
+                        Rect2 rr = Rect2.FromCenterSize(new Vec2(cx, cz), w, h);
+                        float dx = System.Math.Max(rr.MinX - o.Position.X, o.Position.X - rr.MaxX);
+                        float dz = System.Math.Max(rr.MinZ - o.Position.Z, o.Position.Z - rr.MaxZ);
+                        float dd = (dx > 0f || dz > 0f)
+                            ? (float)System.Math.Sqrt(System.Math.Max(dx, 0f) * System.Math.Max(dx, 0f) +
+                                                      System.Math.Max(dz, 0f) * System.Math.Max(dz, 0f))
+                            : 0f;
+                        if (dd < best) best = dd;
+                    }
+                    IsTrue(best <= 14f, "seed " + seed + ": ворота " + o.Id + " в " + best + " м от улицы");
+                }
+                AreEqual(2, gates, "seed " + seed + ": двое ворот");
+            }
+        }
+
+        private static void ImpossibleConfigDiagnosed()
+        {
+            // Маленький квартал не вмещает квоты: InvalidOperationException
+            // с диагностикой вместо квартала с недостающими зданиями.
+            bool thrown = false;
+            try
+            {
+                new QuarterGenerator(new QuarterGeneratorOptions { Seed = 1904, Size = 130f }).Generate();
+            }
+            catch (System.InvalidOperationException) { thrown = true; }
+            IsTrue(thrown, "Size=130: генерация обязана завершиться диагностикой квот");
+
+            thrown = false;
+            try
+            {
+                new QuarterGenerator(new QuarterGeneratorOptions
+                {
+                    Seed = 1,
+                    ResidentialQuotas = new Dictionary<int, int> { { 5, -1 } },
+                });
+            }
+            catch (System.ArgumentOutOfRangeException) { thrown = true; }
+            IsTrue(thrown, "Отрицательная квота отклоняется в Validate");
         }
 
         private static void BasementPhysicalObjects()

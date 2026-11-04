@@ -225,6 +225,20 @@ namespace LifeFromZero.City.Quarter
                 throw new ArgumentException("Нужен хотя бы один архетип здания.", nameof(Archetypes));
             if (CourtyardCount < 0 || CourtyardCount > 3)
                 throw new ArgumentOutOfRangeException(nameof(CourtyardCount), "По ТЗ дворов 2..3 (допустимо 0..3).");
+            if (CustomPlacers == null)
+                throw new ArgumentNullException(nameof(CustomPlacers));
+            if (ResidentialQuotas != null)
+            {
+                foreach (KeyValuePair<int, int> quota in ResidentialQuotas)
+                {
+                    if (quota.Key <= 0)
+                        throw new ArgumentOutOfRangeException(nameof(ResidentialQuotas),
+                            "Этажность в квотах должна быть положительной: " + quota.Key);
+                    if (quota.Value < 0)
+                        throw new ArgumentOutOfRangeException(nameof(ResidentialQuotas),
+                            "Квота этажности " + quota.Key + " не может быть отрицательной: " + quota.Value);
+                }
+            }
         }
     }
 }

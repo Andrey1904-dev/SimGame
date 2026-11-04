@@ -104,6 +104,7 @@ namespace LifeFromZero.City.Quarter
                     PlacePrivateHouses();
                 }
                 BuildBlocksAndCourtyards();
+                ValidateComposition();
                 BuildBasement();
                 BuildDeliveryPoints();
                 BuildRealEstateRegistry();
@@ -115,6 +116,34 @@ namespace LifeFromZero.City.Quarter
 
                 return new QuarterPlan(_o.Seed, s, _objects, _roads, _nodes, _buildings, _courtyards,
                                        _pickup, _playerHome, _shop, _basement, _deliveryPoints, _properties);
+            }
+
+            /// <summary>
+            /// Предохранитель (аудит ТЗ №027): если утверждённая конфигурация
+            /// физически не поместилась (маленький квартал, чужие квоты),
+            /// генерация обязана завершиться понятной диагностикой, а не
+            /// вернуть повреждённый квартал с недостающими зданиями.
+            /// </summary>
+            private void ValidateComposition()
+            {
+                if (_o.ResidentialQuotas != null)
+                {
+                    foreach (KeyValuePair<int, int> quota in _o.ResidentialQuotas)
+                    {
+                        int placed = _placedCount.TryGetValue(quota.Key, out int n) ? n : 0;
+                        if (placed != quota.Value)
+                            throw new InvalidOperationException(
+                                "Seed " + _o.Seed + ": не удалось разместить квоту этажности " +
+                                quota.Key + " (нужно " + quota.Value + ", размещено " + placed +
+                                "). Квартал " + _o.Size + "x" + _o.Size +
+                                " м не вмещает утверждённую конфигурацию; увеличьте Size или измените квоты.");
+                    }
+                }
+                if (_o.IncludeEliteAndPrivate && (_eliteBuildings.Count != 2 || _privateBuildings.Count != 2))
+                    throw new InvalidOperationException(
+                        "Seed " + _o.Seed + ": не удалось разместить элитные ЖК и частные дома (ЖК: " +
+                        _eliteBuildings.Count + "/2, частных: " + _privateBuildings.Count +
+                        "/2). Не хватает свободных приграничных блоков у улиц.");
             }
 
             // ---------- инфраструктура ----------
@@ -900,8 +929,13 @@ namespace LifeFromZero.City.Quarter
                     Rect2 block = PickSpecialBlock();
                     bool streetSouth = block.MinZ > 1f;
                     Vec2 normal = streetSouth ? new Vec2(0f, -1f) : new Vec2(0f, 1f); // к улице
-                    var plot = Rect2.FromCenterSize(block.Center, 26f, 22f);
-                    Vec2 houseCenter = block.Center - normal * 3f;
+                    // Участок прижат к уличной стороне блока (2 м от края), а не
+                    // стоит по центру: иначе ворота оказываются в ~20 м от улицы
+                    // за полосой чужого газона (аудит ТЗ №027, seed 1904/3/7/10).
+                    float plotShift = Math.Max(0f, (block.Height - 22f) / 2f - 2f);
+                    Vec2 plotCenter = block.Center + normal * plotShift;
+                    var plot = Rect2.FromCenterSize(plotCenter, 26f, 22f);
+                    Vec2 houseCenter = plotCenter - normal * 3f;
                     BuildingInfo info = AddSpecialBuilding(arch, houseCenter, 0f, 1, normal,
                         k == 0 ? "private.modern" : "private.classic");
                     _privateBuildings.Add(info);

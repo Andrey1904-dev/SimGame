@@ -41,7 +41,7 @@
 | `Quarter/City.Quarter.asmdef` | Сборка `LifeFromZero.City.Quarter`, `noEngineReferences: true` |
 | `UnityAdapter/QuarterUnityAdapter.cs` | Единственный файл с UnityEngine: строит GameObject/примитивы/материалы/коллайдеры по плану; префабы по TypeId — через `prefabOverrides` |
 | `UnityAdapter/City.Quarter.UnityAdapter.asmdef` | Сборка адаптера, ссылается на ядро |
-| `Tests/` | 63 теста (MiniTestRunner + NUnit-обёртка для Unity), `Console.csproj` для прогона вне Unity; ПВЗ — `PickupPointTests.cs`, развитие города — `CityExpansionTests.cs`, жильё — `HousingTests.cs`, разнообразие — `ArchitectureVarietyTests.cs`, финал — `FinalCityTests.cs`, аудит — `AuditTests.cs` |
+| `Tests/` | 66 тестов (MiniTestRunner + NUnit-обёртка для Unity), `Console.csproj` для прогона вне Unity; ПВЗ — `PickupPointTests.cs`, развитие города — `CityExpansionTests.cs`, жильё — `HousingTests.cs`, разнообразие — `ArchitectureVarietyTests.cs`, финал — `FinalCityTests.cs`, аудит — `AuditTests.cs` |
 
 
 ## Развитие города (ТЗ №024)
@@ -174,7 +174,7 @@ dotnet run --project City/Tests/Console.csproj
 ```
 
 В этой сессии прогон выполнен эквивалентно: автономный модуль + тесты
-скомпилированы Roslyn (C# 8) и запущены на .NET Core 3.1 — **63/63 PASS**
+скомпилированы Roslyn (C# 8) и запущены на .NET Core 3.1 — **66/66 PASS**
 (дороги и связность графа, переходы/разметка, дома вне проезжей части и
 без пересечений, подъезды, комплектность дворов, проезды, фонари,
 повторяемость по seed на seed=42 и серия seed 1..10, расширяемость;

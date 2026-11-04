@@ -63,10 +63,26 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 Build(QuarterGenerator.Generate(seed), transform);
         }
 
+        // Последний построенный этим адаптером квартал. Повторный Build()
+        // уничтожает его вместе с мешами деталей, а не накладывает новый
+        // квартал поверх старого (аудит ТЗ №027). Нужны два квартала в одной
+        // сцене — используйте два компонента-адаптера.
+        private GameObject _builtRoot;
+
         /// <summary>Создаёт дочерние объекты по плану. Возвращает корень квартала.</summary>
         public GameObject Build(QuarterPlan plan, Transform parent)
         {
             if (plan == null) throw new System.ArgumentNullException(nameof(plan));
+
+            if (_builtRoot != null)
+            {
+                Destroy(_builtRoot);
+                _builtRoot = null;
+                // Меши деталей принадлежали уничтоженному кварталу.
+                foreach (Mesh mesh in _createdMeshes)
+                    if (mesh != null) Destroy(mesh);
+                _createdMeshes.Clear();
+            }
 
             _prefabs.Clear();
             foreach (QuarterPrefabOverride o in prefabOverrides)
@@ -74,6 +90,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                     _prefabs[o.typeId] = o.prefab;
 
             var root = new GameObject("Quarter_seed" + plan.Seed);
+            _builtRoot = root;
             if (parent != null) root.transform.SetParent(parent, false);
 
             foreach (PlacedObject obj in plan.Objects)
@@ -244,6 +261,13 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             // коллайдеров персонаж проваливался бы сквозь покрытие (аудит №026).
             typeId == QuarterObjectTypes.Road || typeId == QuarterObjectTypes.Driveway ||
             typeId == QuarterObjectTypes.Intersection || typeId == QuarterObjectTypes.Sidewalk ||
+            // Открытая земля квартала: газоны, дорожки, парковки и площадки —
+            // плоские тонкие боксы, по ним персонаж ходит между дорогами
+            // (аудит ТЗ №027). Разметка/места поверх них коллайдеров не получают.
+            typeId == QuarterObjectTypes.Lawn || typeId == QuarterObjectTypes.Footpath ||
+            typeId == QuarterObjectTypes.PrivatePath || typeId == QuarterObjectTypes.PrivateGarden ||
+            typeId == QuarterObjectTypes.ParkingLot || typeId == QuarterObjectTypes.PickupPlaza ||
+            typeId == QuarterObjectTypes.ShopPlaza ||
             typeId == QuarterObjectTypes.Building || typeId == QuarterObjectTypes.Tree ||
             typeId == QuarterObjectTypes.StreetLamp || typeId == QuarterObjectTypes.YardLamp ||
             typeId == QuarterObjectTypes.Bench || typeId == QuarterObjectTypes.Playground ||
@@ -550,12 +574,22 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 var r2 = new Vector3(baseCenter.x + x, y1, baseCenter.z);
                 AddQuad(a, b, r2, r1); // южный скат
                 AddQuad(c, d, r1, r2); // северный скат
-                // Фронтоны — треугольники; раньше оба AddQuad были вырождены
-                // (p3 == p0 → нулевая нормаль → пропуск), и крыши были открыты
-                // с торцов (аудит ТЗ №026). Порядок вершин даёт внешнюю нормаль.
-                AddQuad(a, d, r1, r1); // западный фронтон (нормаль -X)
-                AddQuad(b, r2, c, c);  // восточный фронтон (нормаль +X)
+                // Фронтоны — настоящие треугольники без вырожденных индексов
+                // (аудит ТЗ №027). Порядок вершин даёт внешнюю нормаль.
+                AddTriangle(a, d, r1); // западный фронтон (нормаль -X)
+                AddTriangle(b, r2, c); // восточный фронтон (нормаль +X)
                 AddQuad(a, b, c, d);   // низ (нормаль вниз)
+            }
+
+            private void AddTriangle(Vector3 p0, Vector3 p1, Vector3 p2)
+            {
+                Vector3 normal = Vector3.Cross(p1 - p0, p2 - p0);
+                if (normal.sqrMagnitude < 0.0001f) return;
+                normal.Normalize();
+                int start = _vertices.Count;
+                _vertices.Add(p0); _vertices.Add(p1); _vertices.Add(p2);
+                for (int i = 0; i < 3; i++) _normals.Add(normal);
+                _triangles.Add(start); _triangles.Add(start + 1); _triangles.Add(start + 2);
             }
 
             private void AddQuad(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3)
