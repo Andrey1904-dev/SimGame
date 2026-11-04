@@ -71,6 +71,13 @@ namespace LifeFromZero.Jobs.Tests
             suite.Add("Доставка: Refresh после завершения не платит повторно", RefreshAfterCompletion);
             suite.Add("Доставка: выплата ровно один раз при многократных операциях", PayoutOnceUnderMixedCalls);
 
+            // Регрессионные тесты аудита ТЗ №017 (сохранение состояния заказов).
+            suite.Add("Снимок доставки: флаг выплаты переживает сохранение — повторной оплаты нет", SnapshotKeepsPayoutFlag);
+            suite.Add("Снимок доставки: активный заказ и слот восстанавливаются", SnapshotRestoresActiveOrder);
+            suite.Add("Снимок доставки: повреждённый снимок отклонён и не меняет состояние", SnapshotRejectsCorrupt);
+            suite.Add("Снимок доставки: восстановление поверх зарегистрированных заказов отклонено", SnapshotRejectsNonEmpty);
+            suite.Add("Статус: несуществующий заказ не выглядит доступным", NotFoundIsNotAvailable);
+
             return suite;
         }
 
@@ -827,6 +834,160 @@ namespace LifeFromZero.Jobs.Tests
             MiniTestRunner.AreEqual(150L, ledger.Credited, "сумма ровно одна");
             MiniTestRunner.AreEqual(DeliveryOrderState.Completed, service.GetStatus(order.Id).Status.State, "заказ завершён");
             MiniTestRunner.IsTrue(service.ActiveOrderId == null, "слот освобождён");
+        }
+
+        // ---------- ТЗ №017: сохранение состояния заказов ----------
+
+        /// <summary>
+        /// Дефект: состояние заказов не сохранялось, поэтому после загрузки игры
+        /// выполненный заказ снова становился Available и оплачивался второй раз.
+        /// </summary>
+        private static void SnapshotKeepsPayoutFlag()
+        {
+            var service = new DeliveryService();
+            DeliveryOrder order = NewOrder();
+            service.RegisterOrder(order);
+
+            var clock = new FakeClock(0d);
+            var location = new FakeLocation(Bakery);
+            var ledger = new FakeLedger();
+
+            service.Accept(order.Id, clock);
+            service.PickUp(order.Id, clock, location);
+            location.MoveTo(Office);
+            MiniTestRunner.IsTrue(service.Complete(order.Id, clock, location, ledger).IsSuccess, "заказ выполнен");
+            MiniTestRunner.AreEqual(150L, ledger.Credited, "оплата получена один раз");
+
+            DeliverySnapshot snapshot = service.CreateSnapshot();
+
+            var loaded = new DeliveryService();
+            string error;
+            MiniTestRunner.IsTrue(loaded.RestoreSnapshot(snapshot, out error), "снимок восстановлен: " + error);
+
+            DeliveryResult status = loaded.GetStatus(order.Id);
+            MiniTestRunner.AreEqual(DeliveryOrderState.Completed, status.Status.State, "состояние сохранено");
+            MiniTestRunner.IsTrue(status.Status.PayoutGranted, "флаг выплаты сохранён");
+
+            // Повторные операции над загруженным заказом не платят второй раз.
+            DeliveryResult repeat = loaded.Complete(order.Id, clock, location, ledger);
+            MiniTestRunner.AreEqual(DeliveryResultCode.InvalidState, repeat.Code, "повторное завершение отклонено");
+            MiniTestRunner.AreEqual(DeliveryResultCode.InvalidState, loaded.Accept(order.Id, clock).Code, "повторное принятие отклонено");
+            MiniTestRunner.AreEqual(150L, ledger.Credited, "оплата не продублирована после загрузки");
+            MiniTestRunner.AreEqual(1, ledger.CreditCalls, "начисление вызвано один раз");
+        }
+
+        private static void SnapshotRestoresActiveOrder()
+        {
+            var service = new DeliveryService();
+            DeliveryOrder active = NewOrder(id: "order-active");
+            DeliveryOrder done = NewOrder(id: "order-done");
+            service.RegisterOrder(active);
+            service.RegisterOrder(done);
+
+            var clock = new FakeClock(5d);
+            var location = new FakeLocation(Bakery);
+            var ledger = new FakeLedger();
+
+            service.Accept(active.Id, clock);
+            service.PickUp(active.Id, clock, location);
+
+            DeliverySnapshot snapshot = service.CreateSnapshot();
+
+            var loaded = new DeliveryService();
+            string error;
+            MiniTestRunner.IsTrue(loaded.RestoreSnapshot(snapshot, out error), "снимок восстановлен: " + error);
+
+            MiniTestRunner.AreEqual("order-active", loaded.ActiveOrderId, "активный заказ восстановлен");
+            MiniTestRunner.AreEqual(DeliveryOrderState.PickedUp, loaded.GetStatus("order-active").Status.State, "груз уже получен");
+            MiniTestRunner.AreEqual(DeliveryOrderState.Available, loaded.GetStatus("order-done").Status.State, "второй заказ доступен");
+
+            // Слот занят: второй заказ не принимается, но и не портится.
+            DeliveryResult attempt = loaded.Accept("order-done", clock);
+            MiniTestRunner.AreEqual(DeliveryResultCode.AlreadyHasActiveOrder, attempt.Code, "слот восстановлен корректно");
+
+            // Работу можно довести до конца и получить оплату один раз.
+            location.MoveTo(Office);
+            MiniTestRunner.IsTrue(loaded.Complete("order-active", clock, location, ledger).IsSuccess, "заказ завершён после загрузки");
+            MiniTestRunner.AreEqual(150L, ledger.Credited, "оплата начислена один раз");
+        }
+
+        private static void SnapshotRejectsCorrupt()
+        {
+            // Источник снимков — отдельный сервис с одним заказом; проверяем,
+            // что именно валидатор отклоняет снимок, а не проверка «сервис не пуст».
+            var source = new DeliveryService();
+            source.RegisterOrder(NewOrder());
+
+            var target = new DeliveryService();
+            string error;
+
+            MiniTestRunner.IsFalse(target.RestoreSnapshot(null, out error), "null-снимок отклонён");
+
+            var wrongVersion = source.CreateSnapshot();
+            wrongVersion.SchemaVersion = 99;
+            MiniTestRunner.IsFalse(target.RestoreSnapshot(wrongVersion, out error), "неверная версия схемы отклонена");
+
+            // «Завершён без выплаты» — противоречивое состояние: снимок не применяется.
+            var contradictory = source.CreateSnapshot();
+            contradictory.Orders[0].State = (int)DeliveryOrderState.Completed;
+            contradictory.Orders[0].PayoutGranted = false;
+            MiniTestRunner.IsFalse(target.RestoreSnapshot(contradictory, out error), "противоречивый снимок отклонён");
+
+            // Два активных заказа тоже невозможны.
+            var twoActive = source.CreateSnapshot();
+            twoActive.Orders[0].State = (int)DeliveryOrderState.Accepted;
+            twoActive.Orders[0].HasAcceptedAt = true;
+            twoActive.Orders[0].AcceptedAtMinutes = 1d;
+            var second = new DeliveryOrderSnapshot
+            {
+                Id = "order-2",
+                CargoTitle = "Груз",
+                PickupPointId = Bakery,
+                DropOffPointId = Office,
+                PaymentRubles = 100L,
+                DeadlineGameMinutes = 100L,
+                State = (int)DeliveryOrderState.PickedUp,
+                HasAcceptedAt = true,
+                AcceptedAtMinutes = 1d,
+                HasPickedUpAt = true,
+                PickedUpAtMinutes = 2d
+            };
+            twoActive.Orders = new[] { twoActive.Orders[0], second };
+            MiniTestRunner.IsFalse(target.RestoreSnapshot(twoActive, out error), "два активных заказа отклонены");
+
+            // Ни один отклонённый снимок не изменил целевой сервис.
+            MiniTestRunner.AreEqual(0, target.Orders.Count, "целевой сервис не тронут");
+            MiniTestRunner.IsTrue(target.ActiveOrderId == null, "слот не занят");
+            MiniTestRunner.AreEqual(DeliveryResultCode.OrderNotFound, target.GetStatus("order-1").Code, "заказов нет");
+        }
+
+        private static void SnapshotRejectsNonEmpty()
+        {
+            var service = new DeliveryService();
+            service.RegisterOrder(NewOrder());
+
+            DeliverySnapshot snapshot = new DeliveryService().CreateSnapshot();
+            string error;
+
+            MiniTestRunner.IsFalse(service.RestoreSnapshot(snapshot, out error), "восстановление поверх заказов отклонено");
+            MiniTestRunner.IsTrue(error != null, "причина сообщена");
+            MiniTestRunner.AreEqual(1, service.Orders.Count, "заказы на месте");
+        }
+
+        private static void NotFoundIsNotAvailable()
+        {
+            IDeliveryService service = new DeliveryService();
+            var clock = new FakeClock(0d);
+            var ledger = new FakeLedger();
+
+            DeliveryResult status = service.GetStatus("nope");
+
+            MiniTestRunner.AreEqual(DeliveryResultCode.OrderNotFound, status.Code, "код OrderNotFound");
+            MiniTestRunner.AreEqual(DeliveryOrderState.None, status.Status.State, "состояние None, а не Available");
+            MiniTestRunner.IsTrue(status.Status.OrderId == null, "нет идентификатора заказа");
+            MiniTestRunner.IsFalse(status.Status.PayoutGranted, "выплаты нет");
+            MiniTestRunner.AreEqual(0, ledger.CreditCalls, "начисление не вызывалось");
+            MiniTestRunner.AreEqual(DeliveryResultCode.OrderNotFound, service.Complete("nope", clock, new FakeLocation(Bakery), ledger).Code, "завершение неизвестного");
         }
 
         private static bool Throws<TException>(Action action) where TException : Exception

@@ -14,7 +14,10 @@ namespace LifeFromZero.Jobs.Delivery
         /// <summary>Идентификатор заказа (null, если заказ не найден).</summary>
         public string OrderId { get; }
 
-        /// <summary>Текущее состояние заказа.</summary>
+        /// <summary>
+        /// Текущее состояние заказа. Для несуществующего заказа —
+        /// <see cref="DeliveryOrderState.None"/> (а не Available).
+        /// </summary>
         public DeliveryOrderState State { get; }
 
         /// <summary>Игровое время, когда заказ был принят (минуты); null — ещё не принимался.</summary>

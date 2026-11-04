@@ -224,6 +224,43 @@ namespace LifeFromZero.Economy.Shop
         }
 
         /// <summary>
+        /// Содержимое журнала незавершённых возвратов (суммы, которые списаны, но ещё
+        /// не вернулись). Нужно, чтобы эти суммы можно было сохранить вместе с игрой:
+        /// журнал живёт в памяти и без сохранения пропал бы при загрузке,
+        /// а деньги игрока — вместе с ним.
+        /// </summary>
+        public IReadOnlyList<Money> PendingRefunds => _pendingRefunds.AsReadOnly();
+
+        /// <summary>
+        /// Заменяет журнал незавершённых возвратов содержимым сохранения.
+        /// Вызывается загрузчиком на свежем экземпляре сервиса; нулевые суммы
+        /// отбрасываются, потому что возвращать нечего.
+        /// </summary>
+        /// <remarks>
+        /// Восстанавливать нечего «за компанию»: после вызова журнал непуст, поэтому
+        /// новые покупки будут блокироваться кодом
+        /// <see cref="EconomyResultCode.PendingRefund"/> до успешного
+        /// <see cref="RetryPendingRefunds"/> — то же поведение, что и до сохранения.
+        /// </remarks>
+        public void RestorePendingRefunds(IEnumerable<Money> amounts)
+        {
+            if (amounts == null)
+            {
+                throw new ArgumentNullException(nameof(amounts));
+            }
+
+            _pendingRefunds.Clear();
+
+            foreach (Money amount in amounts)
+            {
+                if (amount.Rubles > 0L)
+                {
+                    _pendingRefunds.Add(amount);
+                }
+            }
+        }
+
+        /// <summary>
         /// Повторяет все незавершённые возвраты. Возвращает <c>true</c>, если журнал пуст
         /// (в том числе если он был пуст изначально). Вызывается магазином автоматически
         /// в начале каждой покупки; UI/загрузчик может звать явно, чтобы закрыть долг

@@ -793,6 +793,17 @@ namespace LifeFromZero.Debts.Core
 
         public DebtResult RestoreSnapshot(DebtSnapshot snapshot)
         {
+            // Пока списание «в полёте», зачёт ещё не выполнен, и замена словаря долгов
+            // оставила бы платёж применённым к объекту Debt, которого больше нет в сервисе:
+            // деньги списаны, остаток долга не уменьшен, история платежей есть —
+            // то есть несогласованный снимок при следующем сохранении.
+            if (_inDebitWindow)
+            {
+                return DebtResult.Fail(
+                    DebtResultCode.InvalidState, null,
+                    "Восстановление снимка во время незавершённого списания запрещено.");
+            }
+
             if (!DebtSnapshotValidator.Validate(snapshot, out string error))
             {
                 return DebtResult.Fail(DebtResultCode.InvalidSnapshot, null, error);

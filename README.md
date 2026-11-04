@@ -1,15 +1,19 @@
 # SimGame
 
-Игровые модули Life From Zero (ТЗ №014): независимые C#-библиотеки без Unity-зависимостей.
+Игровые модули Life From Zero: независимые C#-библиотеки без Unity-зависимостей.
 
 | Модуль | Сборка | Тесты | Документ |
 |---|---|---|---|
-| `Economy/` — деньги, магазин, покупки | `LifeFromZero.Economy` | 33 | `Economy/INTEGRATION.md` |
-| `Jobs/Delivery/` — курьерские заказы | `LifeFromZero.Jobs.Delivery` | 40 | `Jobs/INTEGRATION.md` |
-| `Phone/` — смартфон, сообщения, контакты, уведомления | `LifeFromZero.Phone` | 90 | `Phone/INTEGRATION.md` |
+| `Economy/` — деньги, магазин, покупки | `LifeFromZero.Economy` | 34 | `Economy/INTEGRATION.md` |
+| `Jobs/Delivery/` — курьерские заказы | `LifeFromZero.Jobs.Delivery` | 45 | `Jobs/INTEGRATION.md` |
+| `Phone/` — смартфон, сообщения, контакты, уведомления | `LifeFromZero.Phone` | 93 | `Phone/INTEGRATION.md` |
+| `Debts/` — долги, платежи, штрафы, стадии взыскания | `LifeFromZero.Debts` | 87 | `Debts/INTEGRATION.md` |
 
-Аудит трёх модулей (ТЗ №015), найденные и исправленные дефекты, порядок подключения
-в Unity и инструкция для Codex: **`INTEGRATION_AUDIT.md`**.
+Полный аудит четырёх модулей (ТЗ №017), найденные дефекты, план подключения
+к Unity и инструкция для Codex: **`FULL_AUDIT_REPORT.md`**,
+**`UNITY_INTEGRATION_PLAN.md`**, **`AUDIT_PROGRESS.md`**.
+Предыдущий аудит трёх модулей (ТЗ №015): `INTEGRATION_AUDIT.md`.
 
-Статус проверки: синтаксис и контракты проверены статически (нет доступа к C#-компилятору);
-сборка и прогон 163 тестов в этой среде не выполнялись — см. `INTEGRATION_AUDIT.md` §6–7.
+Статус проверки: синтаксис и контракты проверены статически (в среде нет
+C#-компилятора); **сборка и прогон 259 тестов не выполнялись** — см.
+`FULL_AUDIT_REPORT.md` §2 и §10.

@@ -7,6 +7,7 @@
 
 using System.Collections.Generic;
 using LifeFromZero.Debts.Core;
+using LifeFromZero.Debts.Payments;
 
 namespace LifeFromZero.Debts.Persistence
 {
@@ -230,7 +231,15 @@ namespace LifeFromZero.Debts.Persistence
                 }
 
                 long totalRemaining = pendingDebt.PrincipalRemaining + pendingDebt.PenaltiesRemaining;
-                if (po.AmountRubles > totalRemaining)
+
+                // Проверка «сумма не больше задолженности» осмысленна только для фазы
+                // DebitPending: там сумма ещё не списана и была сверена с остатком.
+                // Для DebitConfirmed/RefundPending деньги уже ушли из кошелька — сумма
+                // стала фактом, а долг за это время мог уменьшиться (например, долг
+                // закрыли, пока списание было «в полёте»). Такой снимок сервис может
+                // создать сам, и отклонять его нельзя: вместе с ним терялась бы
+                // единственная запись о деньгах, которые надо вернуть.
+                if (po.Phase == (int)DebtOperationPhase.DebitPending && po.AmountRubles > totalRemaining)
                 {
                     error = "Незавершённая операция " + po.PaymentId + ": сумма превышает задолженность.";
                     return false;

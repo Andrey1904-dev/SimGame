@@ -429,6 +429,128 @@ namespace LifeFromZero.Jobs.Delivery
             return new DeliveryResult(DeliveryResultCode.Success, entry.ToStatus(), 0L, double.NaN);
         }
 
+        // ---------- сохранение / восстановление ----------
+
+        /// <summary>
+        /// Снимок всех заказов вместе с состоянием жизненного цикла.
+        /// Нужен, чтобы после загрузки игры флаг <see cref="DeliveryStatus.PayoutGranted"/>
+        /// не терялся: без него выполненный заказ снова стал бы Available
+        /// и его можно было бы оплатить второй раз.
+        /// </summary>
+        public DeliverySnapshot CreateSnapshot()
+        {
+            var orders = new DeliveryOrderSnapshot[_orderList.Count];
+
+            for (int i = 0; i < _orderList.Count; i++)
+            {
+                DeliveryOrder order = _orderList[i];
+                OrderEntry entry = _orders[order.Id];
+
+                orders[i] = new DeliveryOrderSnapshot
+                {
+                    Id = order.Id,
+                    CargoTitle = order.CargoTitle,
+                    PickupPointId = order.PickupPoint.Id,
+                    PickupPointName = order.PickupPoint.DisplayName,
+                    DropOffPointId = order.DropOffPoint.Id,
+                    DropOffPointName = order.DropOffPoint.DisplayName,
+                    PaymentRubles = order.PaymentRubles,
+                    DeadlineGameMinutes = order.DeadlineGameMinutes,
+                    State = (int)entry.State,
+                    HasAcceptedAt = entry.AcceptedAt.HasValue,
+                    AcceptedAtMinutes = entry.AcceptedAt ?? 0d,
+                    HasPickedUpAt = entry.PickedUpAt.HasValue,
+                    PickedUpAtMinutes = entry.PickedUpAt ?? 0d,
+                    HasClosedAt = entry.ClosedAt.HasValue,
+                    ClosedAtMinutes = entry.ClosedAt ?? 0d,
+                    PayoutGranted = entry.PayoutGranted
+                };
+            }
+
+            return new DeliverySnapshot
+            {
+                SchemaVersion = DeliverySnapshot.CurrentSchemaVersion,
+                Orders = orders
+            };
+        }
+
+        /// <summary>
+        /// Заменяет состояние сервиса данными снимка. Снимок проверяется целиком
+        /// до применения: повреждённый не меняет ничего. Восстановление допустимо
+        /// только на «чистом» сервисе (до <see cref="RegisterOrder"/>) — иначе заказы,
+        /// зарегистрированные кодом до загрузки, были бы потеряны.
+        /// </summary>
+        /// <param name="snapshot">Снимок.</param>
+        /// <param name="error">Описание проблемы (null при успехе).</param>
+        /// <returns><c>true</c> — состояние заменено.</returns>
+        public bool RestoreSnapshot(DeliverySnapshot snapshot, out string error)
+        {
+            if (!DeliverySnapshotValidator.Validate(snapshot, out error))
+            {
+                return false;
+            }
+
+            if (_orderList.Count > 0)
+            {
+                error = "Восстановление допустимо только на пустом сервисе доставки.";
+                return false;
+            }
+
+            // Собираем новое состояние в локальных структурах; рабочее не трогаем,
+            // пока все записи не построены.
+            var restored = new Dictionary<string, OrderEntry>(StringComparer.Ordinal);
+            var restoredList = new List<DeliveryOrder>(snapshot.Orders.Length);
+
+            for (int i = 0; i < snapshot.Orders.Length; i++)
+            {
+                DeliveryOrderSnapshot source = snapshot.Orders[i];
+                DeliveryOrder order;
+
+                try
+                {
+                    order = new DeliveryOrder(
+                        source.Id,
+                        source.CargoTitle,
+                        new DeliveryPoint(source.PickupPointId, source.PickupPointName),
+                        new DeliveryPoint(source.DropOffPointId, source.DropOffPointName),
+                        source.PaymentRubles,
+                        source.DeadlineGameMinutes);
+                }
+                catch (Exception exception)
+                {
+                    error = "Заказ " + source.Id + ": " + exception.Message;
+                    return false;
+                }
+
+                var entry = new OrderEntry(order);
+                entry.State = (DeliveryOrderState)source.State;
+                entry.AcceptedAt = source.HasAcceptedAt ? (double?)source.AcceptedAtMinutes : null;
+                entry.PickedUpAt = source.HasPickedUpAt ? (double?)source.PickedUpAtMinutes : null;
+                entry.ClosedAt = source.HasClosedAt ? (double?)source.ClosedAtMinutes : null;
+                entry.PayoutGranted = source.PayoutGranted;
+
+                restored.Add(order.Id, entry);
+                restoredList.Add(order);
+            }
+
+            _orders.Clear();
+            foreach (KeyValuePair<string, OrderEntry> pair in restored)
+            {
+                _orders.Add(pair.Key, pair.Value);
+            }
+
+            _orderList.Clear();
+            _orderList.AddRange(restoredList);
+
+            // Слот выводится из фактических состояний, а не восстанавливается полем:
+            // «зависший» слот после загрузки невозможен.
+            _activeOrderId = null;
+            SyncActiveSlot();
+
+            error = null;
+            return true;
+        }
+
         // ---------- helpers ----------
 
         private DeliveryResult Fail(OrderEntry entry, double now)
@@ -535,10 +657,14 @@ namespace LifeFromZero.Jobs.Delivery
             return ok;
         }
 
-        /// <summary>Статус-заглушка «заказа нет»: состояния Available у него не бывает.</summary>
+        /// <summary>
+        /// Статус-заглушка «заказа нет». Состояние — <see cref="DeliveryOrderState.None"/>:
+        /// раньше здесь стояло Available, и UI/адаптеры могли показать несуществующий
+        /// заказ как доступный к принятию.
+        /// </summary>
         private static DeliveryStatus NotFoundStatus()
         {
-            return new DeliveryStatus(null, DeliveryOrderState.Available, null, null, null, false);
+            return new DeliveryStatus(null, DeliveryOrderState.None, null, null, null, false);
         }
     }
 }

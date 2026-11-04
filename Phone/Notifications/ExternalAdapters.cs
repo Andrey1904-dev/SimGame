@@ -75,6 +75,36 @@ namespace LifeFromZero.Phone.Integrations
         bool TryGetActiveOrderId(out string orderId);
     }
 
+    /// <summary>
+    /// Стадия долга в представлении телефона. Телефон не ссылается на сборку долгов
+    /// (модули изолированы), поэтому стадия дублируется здесь и заполняется адаптером.
+    /// Значения соответствуют DebtStatus модуля долгов по смыслу, но не по номеру:
+    /// адаптер обязан отображать явно, а не приведением int.
+    /// </summary>
+    public enum DebtPhase
+    {
+        /// <summary>Источник не сообщил стадию (старый адаптер или незаполненное поле).</summary>
+        Unknown = 0,
+
+        /// <summary>Долг обслуживается, просрочки нет.</summary>
+        Current = 1,
+
+        /// <summary>Просрочка после льготного периода.</summary>
+        Overdue = 2,
+
+        /// <summary>Напоминания кредитора.</summary>
+        Reminder = 3,
+
+        /// <summary>Усиленное взыскание.</summary>
+        Collection = 4,
+
+        /// <summary>Юридическая стадия.</summary>
+        LegalAction = 5,
+
+        /// <summary>Долг полностью погашен.</summary>
+        Closed = 6
+    }
+
     /// <summary>Краткое описание долга для приложения «Банк».</summary>
     public sealed class DebtDto
     {
@@ -87,12 +117,24 @@ namespace LifeFromZero.Phone.Integrations
         /// <summary>Игровое время, до которого нужно оплатить (в минутах), или -1, если срок не задан.</summary>
         public double DueAtMinutes { get; }
 
+        /// <summary>
+        /// Стадия взыскания. Без неё экран «Банк» показывал остаток и срок,
+        /// но не мог отличить текущий долг от юридической стадии.
+        /// </summary>
+        public DebtPhase Phase { get; }
+
         public DebtDto(string id, string title, long amountRubles, double dueAtMinutes)
+            : this(id, title, amountRubles, dueAtMinutes, DebtPhase.Unknown)
+        {
+        }
+
+        public DebtDto(string id, string title, long amountRubles, double dueAtMinutes, DebtPhase phase)
         {
             Id = id;
             Title = title;
             AmountRubles = amountRubles;
             DueAtMinutes = dueAtMinutes;
+            Phase = phase;
         }
     }
 
