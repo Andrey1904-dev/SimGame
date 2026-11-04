@@ -68,24 +68,14 @@ namespace LifeFromZero.City.Quarter.Tests
 
         private static void PlayerHomeExternalPlacement()
         {
-            QuarterPlan baseline = Plan();
-            // Берём место реального повёрнутого дома из базовой генерации и пробуем
-            // кандидатов, пока один не подойдёт по габаритам дома игрока (36×12 м):
-            // внешнее размещение должно встать ровно на заданную позицию с поворотом.
-            QuarterPlan plan = null;
-            Vec2 usedCenter = new Vec2();
-            foreach (BuildingInfo b in baseline.Buildings)
-            {
-                if (b.IsPlayerHome || Math.Abs(Math.Abs(b.RotationY) - 90f) > 0.01f) continue;
-                var options = new QuarterGeneratorOptions { Seed = 1904 };
-                options.PlayerHome.Position = b.Center;
-                options.PlayerHome.RotationY = 90f;
-                try { plan = new QuarterGenerator(options).Generate(); usedCenter = b.Center; break; }
-                catch (ArgumentException) { /* место занято ПВЗ/магазином — следующий кандидат */ }
-            }
-            IsTrue(plan != null, "Нашлось место для внешнего размещения дома игрока");
-            AreEqual(usedCenter, plan.PlayerHome.Center, "Дом игрока встал на заданную позицию");
-            AreEqual(90f, plan.PlayerHome.RotationY, "Поворот задан извне");
+            // Заданная извне позиция: центр внутреннего блока (131..194 × 56..119),
+            // дом 36×12 м помещается целиком, поворот 0.
+            var options = new QuarterGeneratorOptions { Seed = 1904 };
+            options.PlayerHome.Position = new Vec2(162.5f, 87.5f);
+            options.PlayerHome.RotationY = 0f;
+            QuarterPlan plan = new QuarterGenerator(options).Generate();
+            AreEqual(new Vec2(162.5f, 87.5f), plan.PlayerHome.Center, "Дом игрока встал на заданную позицию");
+            AreEqual(0f, plan.PlayerHome.RotationY, "Поворот задан извне");
 
             // Позиция на дороге отклоняется, а не молча сдвигается.
             var bad = new QuarterGeneratorOptions { Seed = 1904 };

@@ -76,6 +76,18 @@ namespace LifeFromZero.City.Quarter
             new BuildingVariant("panel9.modern", 9, "modern", "flat", "wide", "glazed", "sloped-canopy", 0.2f,
                 new[] { "#9FB4C7", "#D8DDE2", "#8FA3B0" }),
 
+            // --- Элитные ЖК (ТЗ №025) ---
+            new BuildingVariant("elite.glass", 32, "glass", "flat", "wide", "none", "porch", 0.05f,
+                new[] { "#7E97AC", "#93AEC4", "#6E8AA3" }),
+            new BuildingVariant("elite.premium", 34, "modern", "flat-parapet", "standard", "loggia", "porch", 0.08f,
+                new[] { "#C8B394", "#B7A582", "#D3C2A4" }),
+
+            // --- Частные дома (ТЗ №025) ---
+            new BuildingVariant("private.modern", 2, "modern", "flat", "wide", "none", "porch", 0.1f,
+                new[] { "#D8DDE2", "#C9CFD4", "#E4E7EA" }),
+            new BuildingVariant("private.classic", 2, "brick", "pitched", "standard", "none", "flat-canopy", 0.25f,
+                new[] { "#B98A5F", "#A9713F", "#C7A06B" }),
+
             // --- Десятиэтажки ---
             new BuildingVariant("tower10.modern-panel", 10, "modern", "flat", "wide", "loggia", "flat-canopy", 0.25f,
                 new[] { "#9FB4C7", "#B9C8D4", "#8FA3B0" }),

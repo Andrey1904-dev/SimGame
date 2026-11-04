@@ -187,7 +187,7 @@ namespace LifeFromZero.City.Quarter.Tests
             IsTrue(plan.PickupPoint == null, "Опция выключает ПВЗ");
             AreEqual(0, plan.CountOfType(QuarterObjectTypes.PickupBuilding), "Объектов ПВЗ нет");
             IsTrue(RoadGraph.IsConnected(plan), "Граф по-прежнему связный");
-            IsTrue(plan.Buildings.Count >= 20, "Застройка по-прежнему на месте");
+            AreEqual(15, plan.Buildings.Count, "Застройка по ТЗ №025 на месте (15 жилых зданий)");
         }
 
         private static PlacedObject Single(QuarterPlan plan, string typeId)

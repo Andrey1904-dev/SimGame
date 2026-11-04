@@ -11,10 +11,11 @@
 //      только вписывает её дом в город как player.home, сцену не трогает;
 //   2) квартира в девятиэтажке — в будущем покупка/переезд; сейчас в городе
 //      есть 9-этажные дома и один помечен как будущий объект недвижимости;
-//   3) элитная квартира в ЖК 30+ этажей — поздний этап; в квартале 250×250
-//      НЕ строится, есть только определение типа и плановая запись реестра;
-//   4) собственный частный дом с участком — дорого; аналогично только тип
-//      и плановая запись, здание в текущем квартале не строится.
+//   3) элитная квартира в ЖК 30+ этажей — поздний этап; с ТЗ №025 в квартале
+//      строятся два элитных ЖК, записи реестра привязаны к реальным зданиям;
+//   4) собственный частный дом с участком — с ТЗ №025 в квартале строятся два
+//      частных дома на участках, записи реестра также привязаны к зданиям.
+// Покупка и переезд по-прежнему не реализованы: статусы FuturePurchasable.
 
 using System;
 using System.Collections.Generic;
@@ -84,11 +85,11 @@ namespace LifeFromZero.City.Quarter
 
         public static readonly HousingTypeDefinition EliteHighRise =
             new HousingTypeDefinition("housing.elite.highrise", HousingKind.EliteHighRise,
-                "Элитная квартира в ЖК 30+ этажей", typicalFloors: 30, builtInCurrentQuarter: false);
+                "Элитная квартира в ЖК 30+ этажей", typicalFloors: 30, builtInCurrentQuarter: true);
 
         public static readonly HousingTypeDefinition PrivateHouse =
             new HousingTypeDefinition("housing.private.house", HousingKind.PrivateHouse,
-                "Собственный частный дом с участком", typicalFloors: 2, builtInCurrentQuarter: false);
+                "Собственный частный дом с участком", typicalFloors: 2, builtInCurrentQuarter: true);
 
         public static IReadOnlyList<HousingTypeDefinition> All { get; } = new[]
         {

@@ -232,6 +232,9 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             typeId == QuarterObjectTypes.Bench || typeId == QuarterObjectTypes.Playground ||
             typeId == QuarterObjectTypes.PickupBuilding || typeId == QuarterObjectTypes.ShopBuilding ||
             typeId == QuarterObjectTypes.BasementWall || typeId == QuarterObjectTypes.BasementSecondDoor ||
+            typeId == QuarterObjectTypes.BasementFloor || typeId == QuarterObjectTypes.BasementStep ||
+            typeId == QuarterObjectTypes.EliteLobby || typeId == QuarterObjectTypes.PrivateGarage ||
+            typeId == QuarterObjectTypes.PrivateFence ||
             typeId == QuarterObjectTypes.BasementShelf || typeId == QuarterObjectTypes.BasementTable ||
             typeId == QuarterObjectTypes.TrashContainer || typeId == QuarterObjectTypes.Swing ||
             typeId == QuarterObjectTypes.Sandbox;
@@ -610,6 +613,10 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                     return cachedFacade;
                 }
             }
+            if (obj.TypeId == QuarterObjectTypes.Building && obj.Param("style") == "glass")
+                return MaterialFor("detail.glass"); // стеклянный фасад элитной высотки целиком
+            if (obj.TypeId == QuarterObjectTypes.PrivateFence)
+                return MaterialFor(obj.Param("fenceStyle") == "wood" ? "fence.wood" : "fence.metal");
             if (obj.TypeId == QuarterObjectTypes.Tree)
                 return MaterialFor("tree.trunk");
             if (obj.TypeId == QuarterObjectTypes.Bench)
@@ -701,6 +708,12 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 case "playground.2": color = new Color(0.3f, 0.55f, 0.75f); break;
                 case "playground.3": color = new Color(0.45f, 0.65f, 0.35f); break;
                 case QuarterObjectTypes.RoadPatch: color = new Color(0.1f, 0.1f, 0.11f); break;
+                case QuarterObjectTypes.EliteLobby: color = new Color(0.85f, 0.83f, 0.78f); break;
+                case QuarterObjectTypes.EliteCanopy: color = new Color(0.25f, 0.27f, 0.3f); break;
+                case QuarterObjectTypes.PrivateGarage: color = new Color(0.55f, 0.55f, 0.57f); break;
+                case QuarterObjectTypes.PrivateGate: color = new Color(0.35f, 0.38f, 0.4f); break;
+                case QuarterObjectTypes.PrivatePath: color = new Color(0.62f, 0.6f, 0.56f); break;
+                case QuarterObjectTypes.PrivateGarden: color = new Color(0.3f, 0.55f, 0.28f); break;
                 case QuarterObjectTypes.YardFence: color = new Color(0.5f, 0.38f, 0.24f); break;
                 case "detail.concrete": color = new Color(0.75f, 0.75f, 0.73f); break;
                 case "detail.seam": color = new Color(0.45f, 0.44f, 0.42f); break;

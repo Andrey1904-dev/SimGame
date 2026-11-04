@@ -25,7 +25,7 @@ namespace LifeFromZero.City.Quarter.Tests
             suite.Add("Перекрёстков 9, у каждого — переходы и стоп-линии", IntersectionsAndCrosswalks);
             suite.Add("Тротуары идут вдоль каждой улицы с двух сторон", SidewalksAlongRoads);
             suite.Add("Дорожная разметка: осевой пунктир присутствует и не заходит на перекрёстки", CenterLineMarkings);
-            suite.Add("Дома разной этажности (3/5/9/10), пятиэтажки преобладают, высота = этажи × высота этажа", BuildingsMixedHeights);
+            suite.Add("Состав застройки ТЗ №025: ровно 15 жилых зданий нужных типов, высота = этажи × высота этажа", BuildingsMixedHeights);
             suite.Add("Дома не пересекают проезжую часть и тротуары", BuildingsAvoidRoadCorridors);
             suite.Add("Дома не пересекаются друг с другом", BuildingsDoNotOverlap);
             suite.Add("У каждого дома есть подъезды у фасада", BuildingsHaveEntrances);
@@ -138,35 +138,28 @@ namespace LifeFromZero.City.Quarter.Tests
         private static void BuildingsMixedHeights()
         {
             QuarterPlan plan = Plan();
-            IsTrue(plan.Buildings.Count >= 20, "Домов должно быть не меньше 20, фактически: " + plan.Buildings.Count);
-            int c3 = 0, c5 = 0, c9 = 0, c10 = 0;
+            // ТЗ №025: точный состав для seed=1904.
+            AreEqual(15, plan.Buildings.Count, "Всего жилых зданий ровно 15");
+            var counts = new System.Collections.Generic.Dictionary<int, int>();
             foreach (BuildingInfo b in plan.Buildings)
             {
-                IsTrue(b.Floors == 3 || b.Floors == 5 || b.Floors == 9 || b.Floors == 10,
-                    "Дом " + b.Id + ": этажность 3/5/9/10, фактически " + b.Floors);
-                // Реальная высота здания соответствует этажности (2.8–3.2 м на этаж).
+                counts.TryGetValue(b.Floors, out int n);
+                counts[b.Floors] = n + 1;
                 float perFloor = b.Size.Y / b.Floors;
                 IsTrue(perFloor >= 2.8f && perFloor <= 3.2f,
                     "Дом " + b.Id + ": высота этажа " + perFloor);
-                if (b.Floors == 3) c3++; else if (b.Floors == 5) c5++; else if (b.Floors == 9) c9++; else c10++;
-                // Стиль/крыша — из архитектурного варианта дома (см. BuildingVariantCatalog).
-                if (b.Floors == 3)
-                {
-                    IsTrue(b.FacadeStyle == "brick" || b.FacadeStyle == "plaster", "Трёхэтажка — кирпич/штукатурка");
-                    AreEqual("pitched", b.RoofType, "Трёхэтажка — скатное семейство крыш");
-                }
-                if (b.Floors == 5) IsTrue(b.FacadeStyle == "panel" || b.FacadeStyle == "brick", "Пятиэтажка — панель/кирпич");
-                if (b.Floors == 9)
-                {
-                    IsTrue(b.FacadeStyle == "panel" || b.FacadeStyle == "brick" || b.FacadeStyle == "modern", "Девятиэтажка — вариант стиля");
-                    AreEqual("building.panel9", b.ArchetypeId, "Девятиэтажка — отдельный архетип");
-                }
-                if (b.Floors == 10) IsTrue(b.FacadeStyle == "modern" || b.FacadeStyle == "brick", "Десятиэтажка — современная/кирпич");
                 IsTrue(!string.IsNullOrEmpty(b.FacadeColor), "Дом " + b.Id + ": задан цвет фасада");
+                IsTrue(!string.IsNullOrEmpty(b.VariantId), "Дом " + b.Id + ": задан архитектурный вариант");
             }
-            IsTrue(c3 >= 1 && c5 >= 1 && c9 >= 1 && c10 >= 1,
-                "При seed=1904 нужны все типы: 3эт=" + c3 + ", 5эт=" + c5 + ", 9эт=" + c9 + ", 10эт=" + c10);
-            IsTrue(c5 > c3 && c5 > c9 && c5 > c10, "Пятиэтажки преобладают: 5эт=" + c5 + " из " + plan.Buildings.Count);
+            AreEqual(2, counts[3], "Трёхэтажных ровно 2");
+            AreEqual(3, counts[5], "Пятиэтажных ровно 3 (включая дом игрока)");
+            AreEqual(3, counts[9], "Девятиэтажных ровно 3");
+            AreEqual(3, counts[10], "Десятиэтажных ровно 3");
+            AreEqual(2, counts[2], "Частных домов ровно 2");
+            int elite = 0;
+            foreach (BuildingInfo b in plan.Buildings)
+                if (b.Floors >= 30 && b.Floors <= 35) elite++;
+            AreEqual(2, elite, "Элитных ЖК ровно 2 (30–35 этажей)");
         }
 
         private static void BuildingsAvoidRoadCorridors()
@@ -197,7 +190,10 @@ namespace LifeFromZero.City.Quarter.Tests
             QuarterPlan plan = Plan();
             foreach (BuildingInfo b in plan.Buildings)
             {
-                IsTrue(b.Entrances.Count >= 2, "У дома " + b.Id + " минимум 2 подъезда");
+                if (b.Floors >= 3 && b.Floors <= 10)
+                    IsTrue(b.Entrances.Count >= 2, "У дома " + b.Id + " минимум 2 подъезда");
+                else
+                    IsTrue(b.Entrances.Count >= 1, "У дома " + b.Id + " минимум 1 вход (ЖК/частный)");
                 foreach (Vec2 entrance in b.Entrances)
                 {
                     // Подъезд — у длинного фасада: расстояние до центра ≈ глубина/2.

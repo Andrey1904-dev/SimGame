@@ -60,6 +60,13 @@ namespace LifeFromZero.City.Quarter
         public const string Footpath = "yard.footpath";          // пешеходная дорожка во дворе
         public const string YardFence = "yard.fence";            // ограждение палисадника/площадки
         public const string RoadPatch = "road.patch";            // асфальтовая заплатка на проезде/улице
+        public const string EliteLobby = "elite.lobby";          // лобби элитного ЖК (внешняя геометрия)
+        public const string EliteCanopy = "elite.canopy";        // навес входной группы ЖК
+        public const string PrivateGarage = "private.garage";    // гараж частного дома
+        public const string PrivateFence = "private.fence";      // забор участка частного дома
+        public const string PrivateGate = "private.gate";        // ворота участка
+        public const string PrivatePath = "private.path";        // дорожка/подъезд к участку
+        public const string PrivateGarden = "private.garden";    // сад/зелень участка (зона)
         // Подвал под трёхэтажкой
         public const string BasementFloor = "basement.floor";
         public const string BasementWall = "basement.wall";

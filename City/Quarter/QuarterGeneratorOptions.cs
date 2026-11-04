@@ -78,6 +78,30 @@ namespace LifeFromZero.City.Quarter
             new BuildingArchetype("building.panel9", floors: 9, depth: 13f, floorHeight: 2.9f,
                                   lengthVariants: new[] { 24f, 30f, 36f }, entranceSpacing: 12f,
                                   roofType: "flat", facadeStyle: "panel");
+
+        /// <summary>ЖК №1: современная стеклянная высотка, 32 этажа (ТЗ №025).</summary>
+        public static BuildingArchetype EliteGlassTower() =>
+            new BuildingArchetype("building.elite.glass", floors: 32, depth: 18f, floorHeight: 3.1f,
+                                  lengthVariants: new[] { 26f }, entranceSpacing: 26f,
+                                  roofType: "flat", facadeStyle: "glass");
+
+        /// <summary>ЖК №2: премиальный комплекс с комбинированным фасадом, 34 этажа (ТЗ №025).</summary>
+        public static BuildingArchetype ElitePremiumTower() =>
+            new BuildingArchetype("building.elite.premium", floors: 34, depth: 20f, floorHeight: 3.0f,
+                                  lengthVariants: new[] { 30f }, entranceSpacing: 15f,
+                                  roofType: "flat", facadeStyle: "modern");
+
+        /// <summary>Частный дом №1: современный двухэтажный коттедж (ТЗ №025).</summary>
+        public static BuildingArchetype PrivateModernHouse() =>
+            new BuildingArchetype("building.private.modern", floors: 2, depth: 8f, floorHeight: 3.1f,
+                                  lengthVariants: new[] { 11f }, entranceSpacing: 11f,
+                                  roofType: "flat", facadeStyle: "modern");
+
+        /// <summary>Частный дом №2: классический двухэтажный дом со скатной крышей (ТЗ №025).</summary>
+        public static BuildingArchetype PrivateClassicHouse() =>
+            new BuildingArchetype("building.private.classic", floors: 2, depth: 9f, floorHeight: 2.9f,
+                                  lengthVariants: new[] { 10f }, entranceSpacing: 10f,
+                                  roofType: "pitched", facadeStyle: "brick");
     }
 
     /// <summary>
@@ -161,6 +185,19 @@ namespace LifeFromZero.City.Quarter
 
         /// <summary>Дом игрока с зарезервированным местом (см. PlayerHomeOptions).</summary>
         public PlayerHomeOptions PlayerHome { get; set; } = new PlayerHomeOptions();
+
+        /// <summary>
+        /// Точные квоты обычных многоквартирных домов по этажности (ТЗ №025).
+        /// Дом игрока входит в квоту 5 этажей. Элитные ЖК (2) и частные дома (2)
+        /// строятся отдельно и в эти квоты не входят. null — без квот (старое поведение).
+        /// </summary>
+        public Dictionary<int, int> ResidentialQuotas { get; set; } = new Dictionary<int, int>
+        {
+            { 3, 2 }, { 5, 3 }, { 9, 3 }, { 10, 3 }
+        };
+
+        /// <summary>Строить ли два элитных ЖК и два частных дома (ТЗ №025). По умолчанию — да.</summary>
+        public bool IncludeEliteAndPrivate { get; set; } = true;
 
         /// <summary>
         /// Архетипы домов: 3, 5 (преобладают), 9 и 10 этажей.
