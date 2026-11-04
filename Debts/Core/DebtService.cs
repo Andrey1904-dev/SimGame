@@ -234,6 +234,15 @@ namespace LifeFromZero.Debts.Core
                 // ТЗ №021: повтор с тем же paymentId не должен ни списывать, ни зачитывать
                 // деньги, но ответ обязан быть ПОЛНЫМ — иначе вызывающая сторона считает
                 // операцию неуспешной и показывает неверный остаток долга.
+                // paymentId принадлежит ДРУГОМУ долгу: это не повтор, а конфликт ключей.
+                // Повтор обязан возвращать прежний результат только для того долга, по
+                // которому платёж был зачтён, иначе второй долг выглядел бы оплаченным.
+                if (!string.Equals(alreadyPaid.DebtId, debt.Id, StringComparison.Ordinal))
+                {
+                    return Reject(DebtResultCode.DuplicatePayment, debtId, paymentId, debt.TotalRemaining,
+                        "paymentId уже использован для другого долга (" + alreadyPaid.DebtId + "): " + paymentId);
+                }
+
                 if (!alreadyPaid.Refunded)
                 {
                     return ReplayCompletedPayment(alreadyPaid, debt);
