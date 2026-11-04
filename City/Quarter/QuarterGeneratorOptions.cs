@@ -68,6 +68,16 @@ namespace LifeFromZero.City.Quarter
             new BuildingArchetype("building.tower10", floors: 10, depth: 13f, floorHeight: 2.9f,
                                   lengthVariants: new[] { 24f, 30f }, entranceSpacing: 12f,
                                   roofType: "flat", facadeStyle: "modern");
+
+        /// <summary>
+        /// Девятиэтажка: отдельный архетип (типовая панельная серия).
+        /// Как обычное жильё присутствует в городе; одна такая квартира в будущем
+        /// станет недвижимостью игрока — см. HousingCatalog.ApartmentNineStorey.
+        /// </summary>
+        public static BuildingArchetype PanelNineStorey() =>
+            new BuildingArchetype("building.panel9", floors: 9, depth: 13f, floorHeight: 2.9f,
+                                  lengthVariants: new[] { 24f, 30f, 36f }, entranceSpacing: 12f,
+                                  roofType: "flat", facadeStyle: "panel");
     }
 
     /// <summary>
@@ -153,13 +163,16 @@ namespace LifeFromZero.City.Quarter
         public PlayerHomeOptions PlayerHome { get; set; } = new PlayerHomeOptions();
 
         /// <summary>
-        /// Архетипы домов: трёхэтажки, пятиэтажки (преобладают) и десятиэтажки.
-        /// Генератор гарантирует присутствие каждого типа этажности из списка.
+        /// Архетипы домов: 3, 5 (преобладают), 9 и 10 этажей.
+        /// Генератор гарантирует присутствие каждой этажности из списка.
+        /// Этажность обычных домов не привязана к жилью игрока: варианты жилья
+        /// задаются отдельно, каталогом HousingCatalog.
         /// </summary>
         public List<BuildingArchetype> Archetypes { get; set; } = new List<BuildingArchetype>
         {
             BuildingArchetype.PanelFiveStorey(),
             BuildingArchetype.BrickThreeStorey(),
+            BuildingArchetype.PanelNineStorey(),
             BuildingArchetype.ModernTenStorey(),
         };
 

@@ -10,6 +10,7 @@ namespace LifeFromZero.City.Quarter.Tests
             TestSuite suite = QuarterGeneratorTests.CreateSuite();
             suite.AddRange(PickupPointTests.CreateSuite());
             suite.AddRange(CityExpansionTests.CreateSuite());
+            suite.AddRange(HousingTests.CreateSuite());
             return suite;
         }
     }

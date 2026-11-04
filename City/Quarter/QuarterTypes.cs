@@ -464,11 +464,29 @@ namespace LifeFromZero.City.Quarter
                            GroceryShopInfo shop,
                            BasementInfo basement,
                            IReadOnlyList<DeliveryPointInfo> deliveryPoints)
+            : this(seed, size, objects, roads, nodes, buildings, courtyards, pickupPoint,
+                   playerHome, shop, basement, deliveryPoints, new RealEstateProperty[0])
+        {
+        }
+
+        public QuarterPlan(int seed, float size,
+                           IReadOnlyList<PlacedObject> objects,
+                           IReadOnlyList<RoadSegment> roads,
+                           IReadOnlyList<RoadNode> nodes,
+                           IReadOnlyList<BuildingInfo> buildings,
+                           IReadOnlyList<CourtyardInfo> courtyards,
+                           PickupPointInfo pickupPoint,
+                           PlayerHomeInfo playerHome,
+                           GroceryShopInfo shop,
+                           BasementInfo basement,
+                           IReadOnlyList<DeliveryPointInfo> deliveryPoints,
+                           IReadOnlyList<RealEstateProperty> properties)
         {
             Seed = seed; Size = size; Objects = objects; Roads = roads; Nodes = nodes;
             Buildings = buildings; Courtyards = courtyards; PickupPoint = pickupPoint;
             PlayerHome = playerHome; Shop = shop; Basement = basement;
             DeliveryPoints = deliveryPoints ?? new DeliveryPointInfo[0];
+            Properties = properties ?? new RealEstateProperty[0];
         }
 
         public int Seed { get; }
@@ -489,6 +507,11 @@ namespace LifeFromZero.City.Quarter
         public BasementInfo Basement { get; }
         /// <summary>Точки доставки у каждого жилого подъезда (delivery.dropoff).</summary>
         public IReadOnlyList<DeliveryPointInfo> DeliveryPoints { get; }
+        /// <summary>
+        /// Реестр недвижимости: варианты жилья игрока в этом квартале
+        /// (построенные и плановые). Типы — HousingCatalog; покупок здесь нет.
+        /// </summary>
+        public IReadOnlyList<RealEstateProperty> Properties { get; }
 
         public IEnumerable<PlacedObject> OfType(string typeId)
         {

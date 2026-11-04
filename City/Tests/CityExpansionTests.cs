@@ -69,17 +69,22 @@ namespace LifeFromZero.City.Quarter.Tests
         private static void PlayerHomeExternalPlacement()
         {
             QuarterPlan baseline = Plan();
-            // Берём место реального повёрнутого дома из базовой генерации — оно заведомо свободно.
-            BuildingInfo donor = null;
+            // Берём место реального повёрнутого дома из базовой генерации и пробуем
+            // кандидатов, пока один не подойдёт по габаритам дома игрока (36×12 м):
+            // внешнее размещение должно встать ровно на заданную позицию с поворотом.
+            QuarterPlan plan = null;
+            Vec2 usedCenter = new Vec2();
             foreach (BuildingInfo b in baseline.Buildings)
-                if (!b.IsPlayerHome && Math.Abs(Math.Abs(b.RotationY) - 90f) < 0.01f) { donor = b; break; }
-            IsTrue(donor != null, "В квартале есть повёрнутые дома");
-
-            var options = new QuarterGeneratorOptions { Seed = 1904 };
-            options.PlayerHome.Position = donor.Center;
-            options.PlayerHome.RotationY = 90f;
-            QuarterPlan plan = new QuarterGenerator(options).Generate();
-            AreEqual(donor.Center, plan.PlayerHome.Center, "Дом игрока встал на заданную позицию");
+            {
+                if (b.IsPlayerHome || Math.Abs(Math.Abs(b.RotationY) - 90f) > 0.01f) continue;
+                var options = new QuarterGeneratorOptions { Seed = 1904 };
+                options.PlayerHome.Position = b.Center;
+                options.PlayerHome.RotationY = 90f;
+                try { plan = new QuarterGenerator(options).Generate(); usedCenter = b.Center; break; }
+                catch (ArgumentException) { /* место занято ПВЗ/магазином — следующий кандидат */ }
+            }
+            IsTrue(plan != null, "Нашлось место для внешнего размещения дома игрока");
+            AreEqual(usedCenter, plan.PlayerHome.Center, "Дом игрока встал на заданную позицию");
             AreEqual(90f, plan.PlayerHome.RotationY, "Поворот задан извне");
 
             // Позиция на дороге отклоняется, а не молча сдвигается.

@@ -68,6 +68,7 @@ namespace LifeFromZero.City.Quarter
             private PlayerHomeInfo _playerHome;
             private BasementInfo _basement;
             private readonly List<DeliveryPointInfo> _deliveryPoints = new List<DeliveryPointInfo>();
+            private readonly List<RealEstateProperty> _properties = new List<RealEstateProperty>();
             private readonly HashSet<int> _placedFloors = new HashSet<int>(); // какие этажности уже стоят (гарантия разнообразия)
 
             private float[] _lines;       // координаты улиц по каждой оси
@@ -93,6 +94,7 @@ namespace LifeFromZero.City.Quarter
                 BuildBlocksAndCourtyards();
                 BuildBasement();
                 BuildDeliveryPoints();
+                BuildRealEstateRegistry();
                 BuildStreetFurniture();
 
                 var context = new QuarterPlacementContext(_rng, s, _objects, o => _objects.Add(o), IsFree);
@@ -100,7 +102,7 @@ namespace LifeFromZero.City.Quarter
                     placer.Place(context);
 
                 return new QuarterPlan(_o.Seed, s, _objects, _roads, _nodes, _buildings, _courtyards,
-                                       _pickup, _playerHome, _shop, _basement, _deliveryPoints);
+                                       _pickup, _playerHome, _shop, _basement, _deliveryPoints, _properties);
             }
 
             // ---------- инфраструктура ----------
@@ -561,19 +563,20 @@ namespace LifeFromZero.City.Quarter
             /// </summary>
             private BuildingArchetype PickArchetype()
             {
-                foreach (int need in new[] { 3, 10 })
+                foreach (int need in new[] { 3, 9, 10 })
                 {
                     if (_placedFloors.Contains(need)) continue;
                     foreach (BuildingArchetype a in _o.Archetypes)
                         if (a.Floors == need) return a;
                 }
+                int Weight(BuildingArchetype a) => a.Floors == 5 ? 55 : a.Floors == 3 ? 15 : 15;
                 int totalWeight = 0;
                 foreach (BuildingArchetype a in _o.Archetypes)
-                    totalWeight += a.Floors == 5 ? 62 : a.Floors == 3 ? 20 : 18;
+                    totalWeight += Weight(a);
                 int roll = _rng.NextInt(0, totalWeight);
                 foreach (BuildingArchetype a in _o.Archetypes)
                 {
-                    roll -= a.Floors == 5 ? 62 : a.Floors == 3 ? 20 : 18;
+                    roll -= Weight(a);
                     if (roll < 0) return a;
                 }
                 return _o.Archetypes[0];
@@ -654,15 +657,21 @@ namespace LifeFromZero.City.Quarter
 
                 while (true)
                 {
-                    BuildingArchetype arch = PickArchetype();
-                    // Берём случайную длину из тех, что ещё помещаются на стороне.
+                    // Подбираем архетип, который влезает в остаток стороны: если у
+                    // выбранного длины не помещаются, пробуем другие архетипы,
+                    // а не заканчиваем сторону (иначе длинные пятиэтажки проигрывают).
+                    BuildingArchetype arch = null;
                     float length = -1f;
-                    var variants = new List<float>(arch.LengthVariants);
-                    while (variants.Count > 0 && length < 0f)
+                    for (int attempt = 0; attempt < _o.Archetypes.Count && length < 0f; attempt++)
                     {
-                        int idx = _rng.NextInt(0, variants.Count);
-                        if (cursor + variants[idx] <= limit) length = variants[idx];
-                        else variants.RemoveAt(idx);
+                        BuildingArchetype candidate = PickArchetype();
+                        var variants = new List<float>(candidate.LengthVariants);
+                        while (variants.Count > 0 && length < 0f)
+                        {
+                            int idx = _rng.NextInt(0, variants.Count);
+                            if (cursor + variants[idx] <= limit) { length = variants[idx]; arch = candidate; }
+                            else variants.RemoveAt(idx);
+                        }
                     }
                     if (length < 0f) break;
                     float gap = _rng.NextRange(5f, 8f);
@@ -932,6 +941,43 @@ namespace LifeFromZero.City.Quarter
                                    ("interactionRadius", Num(DeliveryPointInfo.DefaultInteractionRadius))));
                     }
                 }
+            }
+
+            // ---------- реестр недвижимости (жильё игрока) ----------
+
+            /// <summary>
+            /// Собирает QuarterPlan.Properties из построенных зданий + плановые
+            /// записи будущих типов жилья. Система не привязана к пятиэтажке:
+            /// стартовая квартира — дом игрока (5 этажей), квартира в девятиэтажке —
+            /// первое 9-этажное здание квартала, элитный ЖК и частный дом —
+            /// только плановые записи без зданий (в этом квартале не строятся).
+            /// Покупки, переездов и цен здесь нет.
+            /// </summary>
+            private void BuildRealEstateRegistry()
+            {
+                if (_playerHome != null)
+                {
+                    _properties.Add(new RealEstateProperty(
+                        PlayerHomeInfo.SpecialId, HousingKind.StartApartment,
+                        _playerHome.BuildingId, _playerHome.Center,
+                        PlayerHomeInfo.ApartmentNumber, PropertyStatus.PlayerStartHome));
+                }
+
+                foreach (BuildingInfo b in _buildings)
+                {
+                    if (b.Floors != 9 || b.IsPlayerHome) continue;
+                    _properties.Add(new RealEstateProperty(
+                        "property.apartment9.01", HousingKind.ApartmentNineStorey,
+                        b.Id, b.Center, apartmentNumber: 0, PropertyStatus.FuturePurchasable));
+                    break;
+                }
+
+                _properties.Add(new RealEstateProperty(
+                    "property.elite.highrise.future", HousingKind.EliteHighRise,
+                    buildingId: null, position: null, apartmentNumber: 0, PropertyStatus.PlannedNotBuilt));
+                _properties.Add(new RealEstateProperty(
+                    "property.private.house.future", HousingKind.PrivateHouse,
+                    buildingId: null, position: null, apartmentNumber: 0, PropertyStatus.PlannedNotBuilt));
             }
 
             // ---------- подвал под трёхэтажкой ----------
@@ -1265,6 +1311,10 @@ namespace LifeFromZero.City.Quarter
                 sb.Append(d.Id).Append("|dropoff|building=").Append(d.BuildingId)
                   .Append("|entrance=").Append(d.EntranceNumber)
                   .Append('|').Append(F(d.Position.X)).Append(',').Append(F(d.Position.Z)).Append('\n');
+            foreach (RealEstateProperty property in plan.Properties)
+                sb.Append(property.Id).Append("|property|kind=").Append(property.Kind)
+                  .Append("|building=").Append(property.BuildingId ?? "-")
+                  .Append("|status=").Append(property.Status).Append('\n');
             if (plan.Basement != null)
             {
                 sb.Append("basement|building=").Append(plan.Basement.BuildingId)
