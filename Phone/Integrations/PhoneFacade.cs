@@ -35,7 +35,7 @@ namespace LifeFromZero.Phone.Integrations
             Notifications = notifications ?? throw new PhoneIntegrationException(
                 "Не передан сервис уведомлений (IPhoneNotificationService).");
 
-            Inbox = new PhoneInbox(Messages);
+            Inbox = new PhoneInbox(Messages, Apps);
             Notifier = new PhoneNotificationHub(Notifications, Apps);
         }
 

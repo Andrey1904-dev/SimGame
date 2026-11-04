@@ -33,6 +33,10 @@ namespace LifeFromZero.Phone.Tests
 
             // Регрессионные тесты аудита ТЗ №015.
             suite.Add("Интеграция: пустые записи в ответах источников не доходят до UI", AdaptersReturnNullEntries);
+
+            // Регрессионные тесты аудита ТЗ №017.
+            suite.Add("Интеграция: доставка через Inbox увеличивает бейдж Messages", InboxUpdatesMessagesBadge);
+            suite.Add("Интеграция: DTO долга несёт стадию для витрины", DebtDtoCarriesStage);
         }
 
         private static void IdSpacesIndependent()
@@ -275,6 +279,56 @@ namespace LifeFromZero.Phone.Tests
             MiniTestRunner.IsTrue(
                 PhoneAppRegistryTests.Throws<PhoneIntegrationException>(() => new PhoneNotificationHub(null, apps)),
                 "PhoneNotificationHub без сервиса");
+        }
+
+        /// <summary>
+        /// Дефект: сообщение, доставленное через Inbox, не увеличивало счётчик
+        /// приложения Messages. Внешняя система (NPC/сюжет) пишет игроку именно
+        /// через Inbox, поэтому иконка приложения не показывала новое сообщение.
+        /// </summary>
+        private static void InboxUpdatesMessagesBadge()
+        {
+            var facade = new PhoneFacade(
+                Apps.PhoneAppRegistry.CreateDefault(),
+                new PhoneMessageService(),
+                new PhoneBook(),
+                new PhoneNotificationService());
+
+            var clock = new FakePhoneClock(1d);
+            MiniTestRunner.IsTrue(facade.Inbox.Deliver("anna", "Первое", clock).IsSuccess, "первое сообщение доставлено");
+            MiniTestRunner.IsTrue(facade.Inbox.Deliver("anna", "Второе", clock).IsSuccess, "второе сообщение доставлено");
+
+            var app = facade.Apps.Get("messages");
+            MiniTestRunner.IsTrue(app.IsSuccess, "приложение Messages найдено");
+            MiniTestRunner.AreEqual(2, app.Value.UnreadCount, "бейдж Messages учитывает доставку через Inbox");
+            MiniTestRunner.AreEqual(2, facade.UnreadApps, "сводный счётчик приложений");
+            MiniTestRunner.AreEqual(2, facade.UnreadMessages, "счётчик сообщений не изменился");
+        }
+
+        /// <summary>
+        /// Требование интеграции: телефон должен показывать не только остаток
+        /// и срок долга, но и стадию (текущий/просрочка/взыскание/закрыт).
+        /// Старый DTO стадии не нёс, поэтому витрина «Банк» не могла её отобразить.
+        /// </summary>
+        private static void DebtDtoCarriesStage()
+        {
+            var debts = new FakeDebtsSource
+            {
+                Debts = new[]
+                {
+                    new DebtDto("rent", "Аренда", 5000L, 1200d, DebtStage.Collection),
+                    new DebtDto("phone", "Связь", 300L, -1d, DebtStage.Closed)
+                }
+            };
+
+            BankSummary summary = new BankSummaryService(new FakeBalanceSource { Rubles = 10L }, debts).GetSummary().Value;
+
+            MiniTestRunner.IsTrue(summary.DebtsAvailable, "долги доступны");
+            MiniTestRunner.AreEqual(2, summary.Debts.Length, "два долга");
+            MiniTestRunner.AreEqual(5000L, summary.Debts[0].AmountRubles, "остаток первого долга");
+            MiniTestRunner.AreEqual(1200d, summary.Debts[0].DueAtMinutes, "срок первого долга");
+            MiniTestRunner.AreEqual(DebtStage.Collection, summary.Debts[0].Stage, "стадия взыскания сохранена");
+            MiniTestRunner.AreEqual(DebtStage.Closed, summary.Debts[1].Stage, "стадия закрытия сохранена");
         }
     }
 }

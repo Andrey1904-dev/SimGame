@@ -39,6 +39,7 @@ namespace LifeFromZero.Debts.Tests
             suite.Add("Регрессия: реентрантное начисление штрафа во время списания не теряется", ReentrantPenaltiesNotLost);
             suite.Add("Регрессия: снимок из обработчика DebtClosed валиден", SnapshotInsideClosedEventValid);
             suite.Add("Регрессия: вложенное восстановление не отменяет операцию в полёте", ReentrantRecoveryKeepsJournal);
+            suite.Add("Регрессия: вложенный платёж во время списания не ломает буфер", NestedDebitWindowKeepsBothOperations);
 
             return suite;
         }
@@ -127,6 +128,38 @@ namespace LifeFromZero.Debts.Tests
             MiniTestRunner.AreEqual(0, service.PendingOperationCount, "после зачёта журнал пуст");
             MiniTestRunner.AreEqual(1, service.GetPaymentHistory(DebtTestEnv.DebtId).Count, "зачёт один раз");
             MiniTestRunner.AreEqual(19000L, inner.Balance, "списано один раз");
+        }
+
+        /// <summary>
+        /// Дефект: «окно списания» было bool-флагом. Вложенный платёж (например,
+        /// адаптер кошелька, который сам начинает платёж по долгу) выходил из
+        /// try/finally и закрывал флаг внешней операции — её журнал терял защиту.
+        /// Теперь глубина вложенных списаний считается в счётчике.
+        /// </summary>
+        private static void NestedDebitWindowKeepsBothOperations()
+        {
+            var clock = new FakeClock();
+            var inner = new FakeWallet(1000L);
+            DebtService service = null;
+
+            var wallet = new ReentrantWallet(inner, () =>
+            {
+                // Вложенный платёж: выполняется внутри списания внешнюю операцию.
+                service.TryPay(DebtTestEnv.DebtId, 100L, "p2");
+            });
+
+            service = DebtTestEnv.CreateService(clock, wallet, null, principal: 1000L);
+
+            // Внешний платёж: во время списания идёт вложенный платёж p2.
+            DebtTestEnv.ExpectSuccess(service.TryPay(DebtTestEnv.DebtId, 500L, "p1"), "внешний платёж");
+
+            service.TryGetDebt(DebtTestEnv.DebtId, out DebtView view);
+            MiniTestRunner.AreEqual(2, service.GetPaymentHistory(DebtTestEnv.DebtId).Count,
+                "оба платежа зачтены ровно один раз");
+            MiniTestRunner.AreEqual(600L, view.PaidTotal, "выплачено за два платежа");
+            MiniTestRunner.AreEqual(400L, view.PrincipalRemaining, "остаток основного долга");
+            MiniTestRunner.AreEqual(400L, inner.Balance, "списано ровно один раз");
+            MiniTestRunner.AreEqual(0, service.PendingOperationCount, "журнал незавершённых пуст");
         }
 
         /// <summary>Приёмник, снимающий снимок состояния прямо в обработчике события.</summary>

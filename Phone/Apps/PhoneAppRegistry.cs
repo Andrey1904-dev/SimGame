@@ -52,11 +52,11 @@ namespace LifeFromZero.Phone.Apps
         {
             return new List<PhoneApp>
             {
-                new PhoneApp("messages", "Сообщения", PhoneAppCategory.Communication, true, 0),
-                new PhoneApp("jobs", "Работа", PhoneAppCategory.Work, true, 0),
-                new PhoneApp("bank", "Банк", PhoneAppCategory.Finance, true, 0),
-                new PhoneApp("contacts", "Контакты", PhoneAppCategory.Contacts, true, 0),
-                new PhoneApp("settings", "Настройки", PhoneAppCategory.System, true, 0)
+                new PhoneApp(PhoneAppIds.Messages, "Сообщения", PhoneAppCategory.Communication, true, 0),
+                new PhoneApp(PhoneAppIds.Jobs, "Работа", PhoneAppCategory.Work, true, 0),
+                new PhoneApp(PhoneAppIds.Bank, "Банк", PhoneAppCategory.Finance, true, 0),
+                new PhoneApp(PhoneAppIds.Contacts, "Контакты", PhoneAppCategory.Contacts, true, 0),
+                new PhoneApp(PhoneAppIds.Settings, "Настройки", PhoneAppCategory.System, true, 0)
             }.AsReadOnly();
         }
 

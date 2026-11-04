@@ -7,6 +7,7 @@ using LifeFromZero.Debts.Core;
 using LifeFromZero.Debts.Events;
 using LifeFromZero.Debts.Payments;
 using LifeFromZero.Debts.Penalties;
+using LifeFromZero.Debts.Persistence;
 using LifeFromZero.Debts.Tests.Fakes;
 
 namespace LifeFromZero.Debts.Tests
@@ -37,6 +38,10 @@ namespace LifeFromZero.Debts.Tests
             suite.Add("Время: исключение часов — AdapterError", ClockThrows);
             suite.Add("Время: повторный UpdateTime в тот же момент идемпотентен", UpdateIdempotent);
             suite.Add("Время: сбой обработчика событий не ломает начисление", SinkThrowsDoesNotBreak);
+
+            // Регрессионные тесты аудита ТЗ №017.
+            suite.Add("Регрессия: снимок внутри PenaltyApplied валиден", SnapshotInsidePenaltyEventValid);
+            suite.Add("Регрессия: restore-по-снимку внутри списания отклонён", RestoreInsideDebitWindowRejected);
 
             return suite;
         }
@@ -383,6 +388,132 @@ namespace LifeFromZero.Debts.Tests
             DebtTestEnv.ExpectSuccess(service.UpdateTime(), "обновление со сбойным обработчиком");
             service.TryGetDebt(DebtTestEnv.DebtId, out DebtView view);
             MiniTestRunner.IsTrue(view.PenaltiesAccrued > 0L, "штраф начислен несмотря на сбой обработчика");
+        }
+
+        /// <summary>
+        /// Дефект: LastPenaltyPeriodIndex продвигался ПОСЛЕ рассылки PenaltyApplied.
+        /// Обработчик, вызывавший CreateSnapshot() в событии, получал снимок, где
+        /// штрафы начислены, но индекс периода ещё стоит на предыдущем значении —
+        /// при загрузке такой снимок начислил бы штраф за тот же период повторно.
+        /// </summary>
+        private static void SnapshotInsidePenaltyEventValid()
+        {
+            var clock = new FakeClock { Minutes = 1000L };
+            var wallet = new FakeWallet(0L);
+            var penalties = PenaltyPolicy.FixedPerPeriod(100L, 500L, 100000L);
+            DebtService service = null;
+            var sink = new SnapshotOnPenaltySink(() => service);
+            service = DebtTestEnv.CreateService(clock, wallet, sink, due: 1000L, penalties: penalties);
+
+            // 1000 → 2500: 1500 минут просрочки = 15 периодов по 100 минут.
+            clock.Minutes = 2500L;
+            DebtTestEnv.ExpectSuccess(service.UpdateTime(), "начисление штрафов");
+
+            MiniTestRunner.IsNotNull(sink.Captured, "снимок из обработчика PenaltyApplied получен");
+            MiniTestRunner.IsTrue(DebtSnapshotValidator.Validate(sink.Captured, out string err),
+                "снимок внутри PenaltyApplied валиден: " + err);
+
+            var debt = sink.Captured.Debts[0];
+            MiniTestRunner.AreEqual(15L, debt.LastPenaltyPeriodIndex, "индекс периода согласован с начислением");
+            MiniTestRunner.AreEqual(7500L, debt.PenaltiesAccrued, "штрафы начислены полностью");
+        }
+
+        /// <summary>
+        /// Дефект: реентрантное RestoreSnapshot внутри списания (адаптер кошелька
+        /// или обработчик событий, который накатывал снимок) заменял рабочее
+        /// состояние сервиса, пока выполняется платеж. Теперь restore внутри
+        /// «окна списания» отклоняется кодом.
+        /// </summary>
+        private static void RestoreInsideDebitWindowRejected()
+        {
+            var clock = new FakeClock { Minutes = 1000L };
+            var wallet = new FakeWallet(10000L);
+
+            // Снимок, который «внешняя система» попытается накатить реентрантно.
+            var outside = DebtTestEnv.CreateService(clock, wallet, null);
+            DebtSnapshot snapshot = outside.CreateSnapshot();
+
+            DebtService service = null;
+            var restoreSink = new RestoringSink(() => service, snapshot);
+
+            // WalletAdapter: при списании вызывает restore на том же сервисе.
+            var reentrant = new ReentrantWallet(wallet, () => restoreSink.TryRestore());
+
+            service = DebtTestEnv.CreateService(clock, reentrant, restoreSink);
+            DebtTestEnv.ExpectSuccess(service.TryPay(DebtTestEnv.DebtId, 1000L, "p1"), "платёж");
+
+            MiniTestRunner.IsTrue(restoreSink.RestoreRejected,
+                "restore внутри выполняющегося платежа отклонён");
+            MiniTestRunner.AreEqual(1, restoreSink.RestoreAttempts, "попытка restore была");
+
+            // Рабочее состояние не сломали: платёж зачтён ровно один раз.
+            service.TryGetDebt(DebtTestEnv.DebtId, out DebtView view);
+            MiniTestRunner.AreEqual(37400L, view.TotalRemaining, "долг уменьшен");
+            MiniTestRunner.AreEqual(1000L, view.PaidTotal, "платёж зачтён один раз");
+            MiniTestRunner.AreEqual(9000L, wallet.Balance, "списано один раз");
+
+            var after = service.CreateSnapshot();
+            MiniTestRunner.IsTrue(DebtSnapshotValidator.Validate(after, out string err),
+                "снимок сервиса после платежа валиден: " + err);
+        }
+
+        /// <summary>Приёмник, который в PenaltyApplied делает снимок и подтверждает его.</summary>
+        private sealed class SnapshotOnPenaltySink : IDebtEventSink
+        {
+            private readonly System.Func<DebtService> _service;
+
+            public DebtSnapshot Captured { get; private set; }
+
+            public SnapshotOnPenaltySink(System.Func<DebtService> service)
+            {
+                _service = service;
+            }
+
+            public void Publish(DebtEvent debtEvent)
+            {
+                if (debtEvent.Type == DebtEventType.PenaltyApplied)
+                {
+                    Captured = _service().CreateSnapshot();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Приёмник, который выполняет restore по заранее снятому снимку —
+        /// можно вызвать как из события, так и из адаптера кошелька.
+        /// </summary>
+        private sealed class RestoringSink : IDebtEventSink
+        {
+            private readonly System.Func<DebtService> _service;
+            private readonly DebtSnapshot _snapshot;
+
+            public RestoringSink(System.Func<DebtService> service, DebtSnapshot snapshot)
+            {
+                _service = service;
+                _snapshot = snapshot;
+            }
+
+            public DebtSnapshot Captured { get; private set; }
+
+            public bool RestoreRejected { get; private set; }
+
+            public int RestoreAttempts { get; private set; }
+
+            public void TryRestore()
+            {
+                DebtResult restore = _service().RestoreSnapshot(_snapshot);
+                RestoreAttempts++;
+                RestoreRejected = !restore.IsSuccess;
+            }
+
+            public void Publish(DebtEvent debtEvent)
+            {
+                if (debtEvent.Type == DebtEventType.PenaltyApplied)
+                {
+                    TryRestore();
+                    Captured = _service().CreateSnapshot();
+                }
+            }
         }
     }
 }

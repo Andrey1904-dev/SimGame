@@ -49,10 +49,11 @@ namespace LifeFromZero.Debts.Core
         private readonly List<DebtPendingOperation> _pending = new List<DebtPendingOperation>();
 
         /// <summary>
-        /// true, пока списание «в полёте» (между записью журнала и зачётом).
-        /// Блокирует реентрантное восстановление текущей операции.
+        /// Глубина вложенных списаний (0 — списаний нет). Счётчик, а не bool:
+        /// реентрантный адаптер может вызвать TryPay ещё раз, и выход из вложенного
+        /// вызова не должен закрыть «окно» внешней операции.
         /// </summary>
-        private bool _inDebitWindow;
+        private int _debitDepth;
 
         private long _lastNow;
 
@@ -283,7 +284,7 @@ namespace LifeFromZero.Debts.Core
             // ResolvePending (например, адаптер дёрнул UpdateTime) не должен
             // разрешать эту операцию — кошелёк ещё не списал деньги, и восстановление
             // ошибочно отменило бы журнал, потеряв защиту от краха.
-            _inDebitWindow = true;
+            _debitDepth++;
             try
             {
                 // 8. Списание.
@@ -327,7 +328,7 @@ namespace LifeFromZero.Debts.Core
             }
             finally
             {
-                _inDebitWindow = false;
+                _debitDepth--;
             }
         }
 
@@ -437,8 +438,8 @@ namespace LifeFromZero.Debts.Core
         /// </summary>
         private void ResolvePending()
         {
-            // _inDebitWindow: операция ещё выполняется, её исход определит сам TryPay.
-            if (_pending.Count == 0 || _inDebitWindow)
+            // _debitDepth > 0: операция ещё выполняется, её исход определит сам TryPay.
+            if (_pending.Count == 0 || _debitDepth > 0)
             {
                 return;
             }
@@ -587,6 +588,11 @@ namespace LifeFromZero.Debts.Core
                             out long penaltyAmount,
                             out long newPeriod))
                     {
+                        // Индекс периода продвигаем ДО рассылки события: обработчик,
+                        // который снимет CreateSnapshot() внутри PenaltyApplied, должен
+                        // получить согласованный снимок (штрафы начислены, период закрыт).
+                        debt.LastPenaltyPeriodIndex = newPeriod;
+
                         if (penaltyAmount > 0L)
                         {
                             debt.PenaltiesRemaining += penaltyAmount;
@@ -596,8 +602,6 @@ namespace LifeFromZero.Debts.Core
                                 DebtEventType.PenaltyApplied, debt.Id, debt.CreditorId, null,
                                 penaltyAmount, now, debt.Status, debt.Status, DebtResultCode.Success));
                         }
-
-                        debt.LastPenaltyPeriodIndex = newPeriod;
                     }
                     // При переполнении (false) начисление пропускается, индекс не меняется —
                     // состояние остаётся корректным, попытка повторится на следующем обновлении.
@@ -793,6 +797,15 @@ namespace LifeFromZero.Debts.Core
 
         public DebtResult RestoreSnapshot(DebtSnapshot snapshot)
         {
+            // Запрет реентрантного восстановления: пока списание «в полёте»,
+            // замена состояния из адаптера/обработчика событий оставила бы
+            // внешнюю операцию работать с уже неактуальным объектом долга.
+            if (_debitDepth > 0)
+            {
+                return DebtResult.Fail(DebtResultCode.AdapterError, null,
+                    "Восстановление во время незавершённого списания запрещено.");
+            }
+
             if (!DebtSnapshotValidator.Validate(snapshot, out string error))
             {
                 return DebtResult.Fail(DebtResultCode.InvalidSnapshot, null, error);

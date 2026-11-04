@@ -75,6 +75,32 @@ namespace LifeFromZero.Phone.Integrations
         bool TryGetActiveOrderId(out string orderId);
     }
 
+    /// <summary>
+    /// Стадия долга для витрины телефона. Значения намеренно совпадают с
+    /// <c>LifeFromZero.Debts.Core.DebtStatus</c>, чтобы адаптер мог привести
+    /// статус без потери смысла. Телефон не ссылается на модуль долгов.
+    /// </summary>
+    public enum DebtStage
+    {
+        /// <summary>Долг обслуживается, просрочки нет.</summary>
+        Current = 0,
+
+        /// <summary>Просрочка после льготного периода.</summary>
+        Overdue = 1,
+
+        /// <summary>Напоминания кредитора.</summary>
+        Reminder = 2,
+
+        /// <summary>Усиленное взыскание.</summary>
+        Collection = 3,
+
+        /// <summary>Юридическая стадия.</summary>
+        LegalAction = 4,
+
+        /// <summary>Долг полностью погашен.</summary>
+        Closed = 5
+    }
+
     /// <summary>Краткое описание долга для приложения «Банк».</summary>
     public sealed class DebtDto
     {
@@ -87,12 +113,25 @@ namespace LifeFromZero.Phone.Integrations
         /// <summary>Игровое время, до которого нужно оплатить (в минутах), или -1, если срок не задан.</summary>
         public double DueAtMinutes { get; }
 
+        /// <summary>Стадия долга: текущий, просрочка, взыскание, закрыт.</summary>
+        public DebtStage Stage { get; }
+
+        /// <summary>
+        /// Старая сигнатура (без стадии). Сохраняется для совместимости:
+        /// существующие адаптеры и тесты не обязаны передавать стадию.
+        /// </summary>
         public DebtDto(string id, string title, long amountRubles, double dueAtMinutes)
+            : this(id, title, amountRubles, dueAtMinutes, DebtStage.Current)
+        {
+        }
+
+        public DebtDto(string id, string title, long amountRubles, double dueAtMinutes, DebtStage stage)
         {
             Id = id;
             Title = title;
             AmountRubles = amountRubles;
             DueAtMinutes = dueAtMinutes;
+            Stage = stage;
         }
     }
 
