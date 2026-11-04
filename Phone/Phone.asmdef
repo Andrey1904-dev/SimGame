@@ -1,0 +1,14 @@
+{
+    "name": "LifeFromZero.Phone",
+    "rootNamespace": "LifeFromZero.Phone",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}
