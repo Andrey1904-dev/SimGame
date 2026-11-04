@@ -17,7 +17,7 @@ namespace LifeFromZero.Economy.Tests
             Console.WriteLine("Life From Zero — Economy module tests (ТЗ №014-В.1)");
             Console.WriteLine();
 
-            TestSuite suite = ShopServiceTests.CreateSuite();
+            TestSuite suite = EconomyTestSuite.CreateAll();
             int failed = MiniTestRunner.RunAndReport(suite);
 
             return failed == 0 ? 0 : 1;

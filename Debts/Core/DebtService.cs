@@ -228,10 +228,19 @@ namespace LifeFromZero.Debts.Core
                 return Reject(DebtResultCode.InvalidArgument, debtId, paymentId, debt.TotalRemaining, "Пустой paymentId.");
             }
 
-            if (_payments.ContainsKey(paymentId))
+            DebtPaymentRecord alreadyPaid;
+            if (_payments.TryGetValue(paymentId, out alreadyPaid))
             {
+                // ТЗ №021: повтор с тем же paymentId не должен ни списывать, ни зачитывать
+                // деньги, но ответ обязан быть ПОЛНЫМ — иначе вызывающая сторона считает
+                // операцию неуспешной и показывает неверный остаток долга.
+                if (!alreadyPaid.Refunded)
+                {
+                    return ReplayCompletedPayment(alreadyPaid, debt);
+                }
+
                 return Reject(DebtResultCode.DuplicatePayment, debtId, paymentId, debt.TotalRemaining,
-                    "paymentId уже использован: " + paymentId);
+                    "paymentId уже использован и деньги по нему возвращены: " + paymentId);
             }
 
             // 3. Сумма.
@@ -422,6 +431,26 @@ namespace LifeFromZero.Debts.Core
                 amount, penaltyPart, principalPart, debt.TotalRemaining, null);
         }
 
+        /// <summary>
+        /// Ответ на повтор уже зачтённого платежа: полные суммы, остаток и НИКАКИХ движений денег.
+        /// </summary>
+        private DebtPaymentResult ReplayCompletedPayment(DebtPaymentRecord record, Debt debt)
+        {
+            Fire(new DebtEvent(
+                DebtEventType.PaymentCompleted, debt.Id, debt.CreditorId, record.PaymentId,
+                0L, ReadClockOrLast(), debt.Status, debt.Status, DebtResultCode.Success));
+
+            return new DebtPaymentResult(
+                DebtResultCode.Success,
+                debt.Id,
+                record.PaymentId,
+                record.AmountRubles,
+                record.PenaltiesPartRubles,
+                record.PrincipalPartRubles,
+                debt.TotalRemaining,
+                "Повтор платежа: деньги не списаны, возвращён прежний результат.");
+        }
+
         /// <summary>Повторяет восстановление незавершённых операций. true — журнал пуст.</summary>
         public bool RetryPendingRecovery()
         {
@@ -513,6 +542,14 @@ namespace LifeFromZero.Debts.Core
             if (refunded)
             {
                 _pending.Remove(operation);
+
+                // ТЗ №021: компенсация по уже зачтённому платежу должна быть видна истории,
+                // иначе повтор с тем же paymentId зачёл бы деньги, которые уже вернули.
+                DebtPaymentRecord record;
+                if (_payments.TryGetValue(operation.PaymentId, out record))
+                {
+                    record.Refunded = true;
+                }
             }
             // Иначе запись остаётся RefundPending и будет повторена позже.
         }
@@ -762,7 +799,8 @@ namespace LifeFromZero.Debts.Core
                     AmountRubles = record.AmountRubles,
                     PenaltiesPartRubles = record.PenaltiesPartRubles,
                     PrincipalPartRubles = record.PrincipalPartRubles,
-                    AtMinutes = record.AtMinutes
+                    AtMinutes = record.AtMinutes,
+                    Refunded = record.Refunded
                 };
             }
 
@@ -856,7 +894,10 @@ namespace LifeFromZero.Debts.Core
                 PaymentRecordSnapshot ps = snapshot.Payments[i];
                 var record = new DebtPaymentRecord(
                     ps.PaymentId, ps.DebtId, ps.AmountRubles,
-                    ps.PenaltiesPartRubles, ps.PrincipalPartRubles, ps.AtMinutes);
+                    ps.PenaltiesPartRubles, ps.PrincipalPartRubles, ps.AtMinutes)
+                {
+                    Refunded = ps.Refunded
+                };
                 payments.Add(record.PaymentId, record);
                 paymentOrder.Add(record);
             }

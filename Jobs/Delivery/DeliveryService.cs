@@ -30,10 +30,11 @@ namespace LifeFromZero.Jobs.Delivery
     {
         private sealed class OrderEntry
         {
-            public OrderEntry(DeliveryOrder order)
+            public OrderEntry(DeliveryOrder order, string payOperationId)
             {
                 Order = order;
                 State = DeliveryOrderState.Available;
+                PayOperationId = payOperationId;
             }
 
             public DeliveryOrder Order { get; }
@@ -47,6 +48,13 @@ namespace LifeFromZero.Jobs.Delivery
             public double? ClosedAt { get; set; }
 
             public bool PayoutGranted { get; set; }
+
+            /// <summary>
+            /// Идентификатор выплаты, выданный при регистрации заказа (ТЗ №021).
+            /// Один и тот же при каждом повторе Complete; новый — для заново
+            /// зарегистрированного заказа с тем же Id.
+            /// </summary>
+            public string PayOperationId { get; }
 
             public bool IsActive
             {
@@ -72,6 +80,12 @@ namespace LifeFromZero.Jobs.Delivery
 
         private string _activeOrderId;
 
+        /// <summary>
+        /// Счётчик выплат. Даёт уникальный идентификатор операции каждому заказу,
+        /// включая повторно зарегистрированный с тем же Id.
+        /// </summary>
+        private long _payoutSequence;
+
         public string ActiveOrderId => _activeOrderId;
 
         public IReadOnlyList<DeliveryOrder> Orders => _orderList.AsReadOnly();
@@ -88,7 +102,8 @@ namespace LifeFromZero.Jobs.Delivery
                 return DeliveryResult.Failure(DeliveryResultCode.InvalidArgument, NotFoundStatus(), double.NaN);
             }
 
-            var entry = new OrderEntry(order);
+            _payoutSequence++;
+            var entry = new OrderEntry(order, PayoutOperation.ForOrder(order.Id, _payoutSequence));
             _orders.Add(order.Id, entry);
             _orderList.Add(order);
 
@@ -282,20 +297,54 @@ namespace LifeFromZero.Jobs.Delivery
             long payment = entry.Order.PaymentRubles;
             bool paid;
             var idempotent = payout as IIdempotentPayoutAdapter;
+            string payOperationId = entry.PayOperationId;
+
             // Legacy adapter remains supported, but cannot protect crash/retry.
             if (!SafeAdapter.Try(() => idempotent != null
-                ? idempotent.TryCredit("delivery:" + entry.Order.Id, payment)
+                ? idempotent.TryCredit(payOperationId, payment)
                 : payout.TryCredit(payment), out paid))
             {
-                return DeliveryResult.Failure(
-                    DeliveryResultCode.AdapterFailure, entry.ToStatus(), now);
+                // Исключение не доказывает, что денег не ушло: спрашиваем журнал.
+                if (idempotent != null && PayoutOperation.IsCreditConfirmed(idempotent, payOperationId))
+                {
+                    paid = true;
+                }
+                else
+                {
+                    return DeliveryResult.Failure(
+                        DeliveryResultCode.AdapterFailure, entry.ToStatus(), now);
+                }
+            }
+
+            // «Вернул true» тоже сверяем, если адаптер умеет отвечать по журналу:
+            // так повторная выплата не пройдёт незамеченной.
+            if (paid && idempotent != null)
+            {
+                bool credited = false;
+                bool answered;
+
+                if (SafeAdapter.Try(() => idempotent.WasCredited(payOperationId, out credited), out answered)
+                    && answered
+                    && !credited)
+                {
+                    return DeliveryResult.Failure(
+                        DeliveryResultCode.AdapterFailure, entry.ToStatus(), now);
+                }
             }
 
             if (!paid)
             {
-                // Деньги не начислены, заказ остаётся в PickedUp и может быть завершён позже.
-                return DeliveryResult.Failure(
-                    DeliveryResultCode.AdapterFailure, entry.ToStatus(), now);
+                // Отказ тоже сверяем с журналом: адаптер мог начислить и «потерять» ответ.
+                if (idempotent != null && PayoutOperation.IsCreditConfirmed(idempotent, payOperationId))
+                {
+                    paid = true;
+                }
+                else
+                {
+                    // Деньги не начислены, заказ остаётся в PickedUp и может быть завершён позже.
+                    return DeliveryResult.Failure(
+                        DeliveryResultCode.AdapterFailure, entry.ToStatus(), now);
+                }
             }
 
             entry.PayoutGranted = true;
@@ -303,7 +352,18 @@ namespace LifeFromZero.Jobs.Delivery
             entry.ClosedAt = now;
             ClearActiveIfMatches(entry.Order.Id);
 
-            return new DeliveryResult(DeliveryResultCode.Success, entry.ToStatus(), payment, now);
+            return new DeliveryResult(DeliveryResultCode.Success, entry.ToStatus(), payment, now, payOperationId);
+        }
+
+        /// <summary>
+        /// Идентификатор выплаты заказа — тот самый, который будет передан в
+        /// <see cref="IIdempotentPayoutAdapter.TryCredit"/> при завершении.
+        /// Нужен UI/логам и тестам; null для неизвестного заказа.
+        /// </summary>
+        public string GetPayoutOperationId(string orderId)
+        {
+            OrderEntry entry;
+            return TryFind(orderId, out entry) ? entry.PayOperationId : null;
         }
 
         public DeliveryResult Cancel(string orderId, IGameClockAdapter clock)
@@ -467,13 +527,15 @@ namespace LifeFromZero.Jobs.Delivery
                     PickedUpAtMinutes = entry.PickedUpAt ?? 0d,
                     HasClosedAt = entry.ClosedAt.HasValue,
                     ClosedAtMinutes = entry.ClosedAt ?? 0d,
-                    PayoutGranted = entry.PayoutGranted
+                    PayoutGranted = entry.PayoutGranted,
+                    PayOperationId = entry.PayOperationId
                 };
             }
 
             return new DeliverySnapshot
             {
                 SchemaVersion = DeliverySnapshot.CurrentSchemaVersion,
+                PayoutSequence = _payoutSequence,
                 Orders = orders
             };
         }
@@ -526,7 +588,17 @@ namespace LifeFromZero.Jobs.Delivery
                     return false;
                 }
 
-                var entry = new OrderEntry(order);
+                string payOperationId = source.PayOperationId;
+
+                if (string.IsNullOrEmpty(payOperationId))
+                {
+                    // Снимок v1 идентификатора выплаты не содержал. Даём его из номера
+                    // заказа, чтобы повтор Complete после загрузки не начислил деньги
+                    // ещё раз с другим ключом.
+                    payOperationId = PayoutOperation.ForOrder(order.Id, i + 1);
+                }
+
+                var entry = new OrderEntry(order, payOperationId);
                 entry.State = (DeliveryOrderState)source.State;
                 entry.AcceptedAt = source.HasAcceptedAt ? (double?)source.AcceptedAtMinutes : null;
                 entry.PickedUpAt = source.HasPickedUpAt ? (double?)source.PickedUpAtMinutes : null;
@@ -545,6 +617,20 @@ namespace LifeFromZero.Jobs.Delivery
 
             _orderList.Clear();
             _orderList.AddRange(restoredList);
+
+            // Счётчик продолжаем с сохранённого значения (плюс запас на порядок снимка),
+            // иначе новые заказы могли бы получить уже занятый идентификатор выплаты.
+            _payoutSequence = snapshot.PayoutSequence > 0L
+                ? snapshot.PayoutSequence
+                : restoredList.Count;
+
+            for (int i = 0; i < restoredList.Count; i++)
+            {
+                if (_payoutSequence < i + 1)
+                {
+                    _payoutSequence = i + 1;
+                }
+            }
 
             // Слот выводится из фактических состояний, а не восстанавливается полем:
             // «зависший» слот после загрузки невозможен.

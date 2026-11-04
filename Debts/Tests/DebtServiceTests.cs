@@ -318,8 +318,13 @@ namespace LifeFromZero.Debts.Tests
             DebtService service = DebtTestEnv.CreateService(clock, wallet, null);
 
             DebtTestEnv.ExpectSuccess(service.TryPay(DebtTestEnv.DebtId, 1000L, "same"), "первый");
+
+            // ТЗ №021: повтор идемпотентен и возвращает ПОЛНЫЙ прежний результат
+            // (суммы и остаток), а не отказ — иначе UI показывал бы неверный остаток.
             DebtPaymentResult second = service.TryPay(DebtTestEnv.DebtId, 1000L, "same");
-            DebtTestEnv.ExpectCode(DebtResultCode.DuplicatePayment, second, "повтор paymentId");
+            DebtTestEnv.ExpectCode(DebtResultCode.Success, second, "повтор paymentId — успех без списания");
+            MiniTestRunner.AreEqual(1000L, second.PaidRubles, "возвращена зачтённая сумма");
+            MiniTestRunner.AreEqual(37400L, second.RemainingRubles, "возвращён актуальный остаток");
             MiniTestRunner.AreEqual(4000L, wallet.Balance, "списано только один раз");
             MiniTestRunner.AreEqual(1, wallet.DebitCalls, "один вызов списания");
         }

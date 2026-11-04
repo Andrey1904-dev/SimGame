@@ -75,16 +75,34 @@ namespace LifeFromZero.Jobs.Delivery
         /// <summary>Игровое время, зафиксированное при операции (NaN, если время недоступно).</summary>
         public double NowMinutes { get; }
 
+        /// <summary>
+        /// Идентификатор операции выплаты, использованный при завершении заказа
+        /// (null, если заказ ещё не завершался). Повтор Complete обязан использовать
+        /// тот же идентификатор — это и делает выплату идемпотентной.
+        /// </summary>
+        public string PayoutOperationId { get; }
+
         public DeliveryResult(
             DeliveryResultCode code,
             DeliveryStatus status,
             long paidRubles,
             double nowMinutes)
+            : this(code, status, paidRubles, nowMinutes, null)
+        {
+        }
+
+        public DeliveryResult(
+            DeliveryResultCode code,
+            DeliveryStatus status,
+            long paidRubles,
+            double nowMinutes,
+            string payoutOperationId)
         {
             Code = code;
             Status = status;
             PaidRubles = paidRubles;
             NowMinutes = nowMinutes;
+            PayoutOperationId = payoutOperationId;
         }
 
         /// <summary>Создаёт результат с явным торговым статусом-заглушкой для несуществующего заказа.</summary>

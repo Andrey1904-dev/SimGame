@@ -354,7 +354,9 @@ namespace LifeFromZero.Economy.Tests
             PurchaseResult result = shop.Purchase(
                 wallet, inventory, new PurchaseRequest("bread", 1));
 
-            MiniTestRunner.AreEqual(EconomyResultCode.InternalError, result.Code, "исключение кошелька => внутренняя ошибка");
+            // ТЗ №021: у старого адаптера нет журнала операций, поэтому исключение списания
+            // больше не означает «денег нет» — исход честно неизвестен (OutcomeUnknown).
+            MiniTestRunner.AreEqual(EconomyResultCode.OutcomeUnknown, result.Code, "исключение кошелька => исход неизвестен");
             MiniTestRunner.AreEqual(1000L, wallet.Balance.Rubles, "баланс не изменён");
             MiniTestRunner.AreEqual(0, wallet.RefundCalls, "компенсация не нужна: списания не было");
             MiniTestRunner.AreEqual(0, inventory.GetCount("bread"), "предметы не выданы");

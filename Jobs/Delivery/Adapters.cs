@@ -34,13 +34,31 @@ namespace LifeFromZero.Jobs.Delivery
         bool TryCredit(long rubles);
     }
 
-    /// <summary>Durable wallet must atomically record operation ID, amount and credit.
-    /// Repeating the same ID and amount returns true without crediting again; a conflicting
-    /// amount returns false. IDs must be scoped to a single save lineage by the adapter.
-    /// An exception may mean an unknown outcome; retry with the identical ID.</summary>
+    /// <summary>
+    /// Идемпотентное начисление: durable-кошелёк атомарно записывает идентификатор операции,
+    /// сумму и факт начисления.
+    /// </summary>
+    /// <remarks>
+    /// Контракт адаптера:
+    /// <list type="number">
+    /// <item>Повтор с тем же ID и той же суммой возвращает <c>true</c> и НЕ начисляет деньги
+    ///       второй раз.</item>
+    /// <item>Тот же ID с другой суммой — <c>false</c> (конфликт, ничего не начислено).</item>
+    /// <item>Журнал долговечен и переживает перезапуск игры; ключи изолированы по линии
+    ///       сохранения (или уникальны как минимум внутри неё).</item>
+    /// <item>Исключение означает «исход неизвестен»: сервис повторит операцию с ТЕМ ЖЕ ID.</item>
+    /// </list>
+    /// </remarks>
     public interface IIdempotentPayoutAdapter : IPayoutAdapter
     {
+        /// <summary>Начисление под идентификатором операции (см. контракт выше).</summary>
         bool TryCredit(string operationId, long rubles);
+
+        /// <summary>
+        /// Ответ по журналу: было ли реально начисление по этому идентификатору.
+        /// </summary>
+        /// <returns><c>false</c> — журнал недоступен, исход неизвестен.</returns>
+        bool WasCredited(string operationId, out bool credited);
     }
 
     /// <summary>

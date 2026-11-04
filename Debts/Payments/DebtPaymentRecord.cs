@@ -19,6 +19,13 @@ namespace LifeFromZero.Debts.Payments
         /// <summary>Игровое время подтверждения платежа, минуты.</summary>
         public long AtMinutes { get; }
 
+        /// <summary>
+        /// Возврат денег по этому платежу выполнен (компенсация при неудавшемся зачёте).
+        /// ТЗ №021: без этого флага повторный вызов TryPay с тем же paymentId мог
+        /// зачесть платёж, деньги за который уже вернулись игроку.
+        /// </summary>
+        public bool Refunded { get; internal set; }
+
         public DebtPaymentRecord(
             string paymentId,
             string debtId,

@@ -1,4 +1,4 @@
-// Life From Zero — Economy module (ТЗ №014-В.1)
+// Life From Zero — Economy module (ТЗ №014-В.1, идентификаторы операций — ТЗ №021)
 // Namespace: LifeFromZero.Economy.Shop
 
 using System;
@@ -33,8 +33,20 @@ namespace LifeFromZero.Economy.Shop
         /// </summary>
         public Money TotalCost { get; }
 
+        /// <summary>
+        /// Идентификатор покупки, под которым операция записана в журнал (null, если покупка
+        /// выполнялась без идентификатора). По нему вызов повторяется безопасно.
+        /// </summary>
+        public string PurchaseId { get; }
+
         /// <summary>Успешна ли операция целиком.</summary>
         public bool IsSuccess => Code == EconomyResultCode.Success;
+
+        /// <summary>
+        /// true, если это ответ на повторную отправку того же <see cref="PurchaseId"/>:
+        /// деньги и товар в этом вызове НЕ менялись.
+        /// </summary>
+        public bool IsReplay { get; }
 
         private PurchaseResult(
             EconomyResultCode code,
@@ -42,7 +54,9 @@ namespace LifeFromZero.Economy.Shop
             int requestedQuantity,
             int purchasedQuantity,
             int unitsGranted,
-            Money totalCost)
+            Money totalCost,
+            string purchaseId,
+            bool isReplay)
         {
             Code = code;
             Product = product;
@@ -50,13 +64,16 @@ namespace LifeFromZero.Economy.Shop
             PurchasedQuantity = purchasedQuantity;
             UnitsGranted = unitsGranted;
             TotalCost = totalCost;
+            PurchaseId = purchaseId;
+            IsReplay = isReplay;
         }
 
         internal static PurchaseResult Success(
             Product product,
             int requestedQuantity,
             int unitsGranted,
-            Money totalCost)
+            Money totalCost,
+            string purchaseId)
         {
             return new PurchaseResult(
                 EconomyResultCode.Success,
@@ -64,26 +81,64 @@ namespace LifeFromZero.Economy.Shop
                 requestedQuantity,
                 requestedQuantity,
                 unitsGranted,
-                totalCost);
+                totalCost,
+                purchaseId,
+                false);
+        }
+
+        /// <summary>
+        /// Ответ на повтор: товар был выдан раньше, сейчас ничего не менялось.
+        /// </summary>
+        internal static PurchaseResult SuccessFromReplay(
+            Product product,
+            int requestedQuantity,
+            int unitsGranted,
+            Money totalCost,
+            string purchaseId)
+        {
+            return new PurchaseResult(
+                EconomyResultCode.Success,
+                product,
+                requestedQuantity,
+                requestedQuantity,
+                unitsGranted,
+                totalCost,
+                purchaseId,
+                true);
         }
 
         internal static PurchaseResult Failure(
             EconomyResultCode code,
             Product product,
             int requestedQuantity,
-            Money totalCost)
+            Money totalCost,
+            string purchaseId)
         {
-            return new PurchaseResult(code, product, requestedQuantity, 0, 0, totalCost);
+            return new PurchaseResult(code, product, requestedQuantity, 0, 0, totalCost, purchaseId, false);
+        }
+
+        /// <summary>Ответ на повтор: прежний отказ, сейчас ничего не менялось.</summary>
+        internal static PurchaseResult FailureFromReplay(
+            EconomyResultCode code,
+            Product product,
+            int requestedQuantity,
+            Money totalCost,
+            string purchaseId)
+        {
+            return new PurchaseResult(code, product, requestedQuantity, 0, 0, totalCost, purchaseId, true);
         }
 
         public override string ToString()
         {
             return "PurchaseResult(" + Code
+                   + ", id=" + (PurchaseId ?? "<none>")
                    + ", product=" + (Product != null ? Product.Id : "<none>")
                    + ", requested=" + RequestedQuantity
                    + ", purchased=" + PurchasedQuantity
                    + ", units=" + UnitsGranted
-                   + ", cost=" + TotalCost + ")";
+                   + ", cost=" + TotalCost
+                   + (IsReplay ? ", replay" : string.Empty)
+                   + ")";
         }
     }
 
@@ -119,7 +174,7 @@ namespace LifeFromZero.Economy.Shop
 
         /// <summary>
         /// Сколько сумм ждёт возврата (0 — всё согласовано). Непустой журнал блокирует
-        /// новые покупки кодом <see cref="EconomyResultCode.PendingRefund"/>.
+        /// новые покупки кодом <see cref="EconomyResultCode.PendingOperation"/>.
         /// </summary>
         int PendingRefundCount { get; }
 

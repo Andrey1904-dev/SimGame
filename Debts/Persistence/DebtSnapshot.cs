@@ -67,6 +67,12 @@ namespace LifeFromZero.Debts.Persistence
         public long PenaltiesPartRubles;
         public long PrincipalPartRubles;
         public long AtMinutes;
+
+        /// <summary>
+        /// Деньги по платежу возвращены компенсацией (ТЗ №021). Для снимков, созданных
+        /// до появления поля, значение false — прежнее поведение сохраняется.
+        /// </summary>
+        public bool Refunded;
     }
 
     /// <summary>Незавершённая операция в снимке (для безопасного восстановления).</summary>
@@ -87,7 +93,10 @@ namespace LifeFromZero.Debts.Persistence
     [Serializable]
     public sealed class DebtSnapshot
     {
-        /// <summary>Текущая версия схемы снимка.</summary>
+        /// <summary>
+        /// Текущая версия схемы снимка. Версия НЕ повышена (ТЗ №021): новое поле
+        /// Refunded аддитивно, а снимки без него читаются как Refunded = false.
+        /// </summary>
         public const int CurrentSchemaVersion = 1;
 
         public int SchemaVersion = CurrentSchemaVersion;

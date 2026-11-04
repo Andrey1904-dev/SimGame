@@ -49,6 +49,13 @@ namespace LifeFromZero.Jobs.Delivery
 
         /// <summary>Оплата начислена (ровно один раз при успешном завершении).</summary>
         public bool PayoutGranted;
+
+        /// <summary>
+        /// Идентификатор операции выплаты (ТЗ №021). Пустое значение допускается только
+        /// для снимков, созданных до появления этого поля: при загрузке идентификатор
+        /// восстанавливается, чтобы повтор Complete не начислил деньги вторым ключом.
+        /// </summary>
+        public string PayOperationId;
     }
 
     /// <summary>Полный снимок состояния модуля доставки.</summary>
@@ -59,6 +66,12 @@ namespace LifeFromZero.Jobs.Delivery
         public const int CurrentSchemaVersion = 1;
 
         public int SchemaVersion = CurrentSchemaVersion;
+
+        /// <summary>
+        /// Счётчик выданных идентификаторов выплат. Нужен, чтобы после загрузки новый заказ
+        /// не получил уже использованный идентификатор.
+        /// </summary>
+        public long PayoutSequence;
 
         /// <summary>Заказы в порядке регистрации.</summary>
         public DeliveryOrderSnapshot[] Orders = new DeliveryOrderSnapshot[0];
