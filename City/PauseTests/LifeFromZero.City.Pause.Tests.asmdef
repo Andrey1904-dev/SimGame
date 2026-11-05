@@ -1,7 +1,23 @@
 {
-  "name": "LifeFromZero.City.Pause.Tests",
-  "references": ["LifeFromZero.City.Pause", "UnityEngine.TestRunner", "Unity.ugui"],
-  "optionalUnityReferences": ["TestAssemblies"],
-  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
-  "autoReferenced": false
+    "name": "LifeFromZero.City.Pause.Tests",
+    "rootNamespace": "LifeFromZero.City.Pause.Tests",
+    "references": [
+        "LifeFromZero.City.Pause",
+        "UnityEngine.UI",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
 }
