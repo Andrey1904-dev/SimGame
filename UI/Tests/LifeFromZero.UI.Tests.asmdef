@@ -3,6 +3,8 @@
     "rootNamespace": "LifeFromZero.UI.Tests",
     "references": [
         "LifeFromZero.UI",
+        "LifeFromZero.UI.Core",
+        "LifeFromZero.City.Quarter",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

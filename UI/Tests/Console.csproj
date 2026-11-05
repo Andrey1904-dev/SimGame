@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <Compile Include="../Core/**/*.cs" />
+    <!-- Район нужен тестам моста QuarterPlan → карта/граф (UI/Core/QuarterPlanAdapter.cs). -->
+    <Compile Include="../../City/Quarter/**/*.cs" />
     <Compile Include="**/*.cs" />
   </ItemGroup>
 
