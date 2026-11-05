@@ -244,6 +244,7 @@ namespace LifeFromZero.UI.Editor
                     if (root.GetComponent<UiGameBridge>() == null) root.AddComponent<UiGameBridge>();
                     if (root.GetComponent<PauseUiSnapshotSource>() == null) root.AddComponent<PauseUiSnapshotSource>();
                     if (root.GetComponent<DeliveryServiceBridge>() == null) root.AddComponent<DeliveryServiceBridge>();
+                    if (root.GetComponent<UiMenuActions>() == null) root.AddComponent<UiMenuActions>();
 
                     // UiBootstrap сам создаёт экраны в Awake, но если проект запускает
                     // интерфейс из кода (UiBootstrap.Ensure) — экраны всё равно нужны.
@@ -285,6 +286,10 @@ namespace LifeFromZero.UI.Editor
 
         private static void AddManualSteps(UiInstallResult result)
         {
+            result.ManualSteps.Add(
+                "UiMenuActions: для кнопок «Сохранить»/«Загрузить»/«Главное меню» назначить компоненты, " +
+                "реализующие IUiGameAction. Без них кнопки НЕактивны (это правильно: без сохранения " +
+                "кнопка «Сохранить» врала бы игроку).");
             result.ManualSteps.Add(
                 "UiGameBridge → Player Input Behaviours: перетащить компоненты движения и камеры " +
                 "(без них персонаж продолжит двигаться при открытом окне). " +

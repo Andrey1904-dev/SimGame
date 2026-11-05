@@ -54,6 +54,12 @@ namespace LifeFromZero.UI.Runtime
         [Tooltip("Пусто — ищется PauseIntegration в сцене. Найденный используется вместо собственного меню.")]
         [SerializeField] private PauseIntegration existingPause;
 
+        [Tooltip("Исполнители кнопок «Сохранить/Загрузить/Главное меню». Пусто — ищется UiMenuActions в сцене.")]
+        [SerializeField] private UiMenuActions menuActions;
+
+        [Tooltip("Есть ли в игре страница управления (кнопка «Управление»).")]
+        [SerializeField] private bool hasControlsPage;
+
         /// <summary>Найденная существующая пауза (может быть null).</summary>
         public PauseIntegration ExistingPause => existingPause;
 
@@ -68,6 +74,7 @@ namespace LifeFromZero.UI.Runtime
         public void ResolveReferences()
         {
             if (existingPause == null) existingPause = FindAnyObjectByType<PauseIntegration>();
+            if (menuActions == null) menuActions = FindAnyObjectByType<UiMenuActions>();
             if (player == null)
             {
                 Camera camera = Camera.main;
@@ -165,7 +172,20 @@ namespace LifeFromZero.UI.Runtime
                 return true;
             }
 
-            // 2. Действия, которые UI делает сам (навигация по своим экранам).
+            // 2. Кнопки, у которых есть исполнитель в игре (сохранение/загрузка/меню).
+            if (menuActions != null)
+            {
+                string message;
+                if (menuActions.TryExecute(actionId, out message))
+                {
+                    ShowMessage(message);
+                    return true;
+                }
+                ShowMessage(message);
+                return false;
+            }
+
+            // 3. Действия, которые UI делает сам (навигация по своим экранам).
             UiRouter router = UiRouter.Instance;
             if (router == null) return false;
 
@@ -206,6 +226,8 @@ namespace LifeFromZero.UI.Runtime
             PauseAction pauseAction;
             if (existingPause != null && TryMap(actionId, out pauseAction)) return existingPause.IsAvailable(pauseAction);
 
+            if (menuActions != null) return menuActions.IsAvailable(actionId, hasControlsPage);
+
             UiRouter router = UiRouter.Instance;
             if (router == null) return false;
 
@@ -220,6 +242,17 @@ namespace LifeFromZero.UI.Runtime
                 default:
                     return false; // save/load/settings/controls/main-menu/quit — нечем выполнять
             }
+        }
+
+        /// <summary>Показать игроку текст от системы (успех или причину отказа).</summary>
+        private static void ShowMessage(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return;
+            UiRouter router = UiRouter.Instance;
+            if (router == null) return;
+            var hud = FindAnyObjectByType<HudScreen>();
+            if (hud != null) hud.ShowToast(message);
+            else Debug.Log("[UiGameBridge] " + message);
         }
 
         internal static bool TryMap(string actionId, out PauseAction action)

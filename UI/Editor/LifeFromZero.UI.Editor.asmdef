@@ -2,6 +2,7 @@
     "name": "LifeFromZero.UI.Editor",
     "rootNamespace": "LifeFromZero.UI.Editor",
     "references": [
+        "UnityEngine.UI",
         "LifeFromZero.UI",
         "LifeFromZero.UI.Core",
         "LifeFromZero.City.Quarter",

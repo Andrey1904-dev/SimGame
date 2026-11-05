@@ -115,6 +115,14 @@ namespace UnityEngine
         public bool activeSelf => true;
         public void SetActive(bool v) {}
     }
+    public class AudioListener {
+        public static float volume { get; set; } = 1f;
+    }
+    public static class Screen {
+        public static bool fullScreen { get; set; }
+        public static int width => 1920;
+        public static int height => 1080;
+    }
     public class Camera : Behaviour {
         public static Camera main => null;
         public Transform transform => gameObject.transform;
@@ -211,6 +219,12 @@ namespace UnityEngine
         public static void Log(object m) {}
         public static void LogWarning(object m) {}
         public static void LogError(object m) {}
+    }
+    public static class PlayerPrefs {
+        public static bool HasKey(string key) => false;
+        public static void SetFloat(string key, float value) {}
+        public static float GetFloat(string key, float fallback) => fallback;
+        public static void Save() {}
     }
     public static class Time {
         public static float timeScale { get; set; } = 1f;

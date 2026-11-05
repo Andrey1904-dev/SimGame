@@ -2,6 +2,7 @@
     "name": "LifeFromZero.UI",
     "rootNamespace": "LifeFromZero.UI.Runtime",
     "references": [
+        "UnityEngine.UI",
         "LifeFromZero.UI.Core",
         "LifeFromZero.City.Quarter",
         "LifeFromZero.City.Pause",
