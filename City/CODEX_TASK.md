@@ -1,45 +1,13 @@
-# Задание Codex: District750 (ТЗ №034)
+# Codex: District750 и Pause Menu (ТЗ #035)
 
-Начни только с этого файла. Остальные документы открывай по указанным пунктам.
+Начни только с этого файла. Реализация: точный commit `e15088ce798d54c4f05224b26bd2bab7f85f2f06`; база с уже слитым PR #10 — `327fbaa6388792d39dc55537e05be5efe1031a0d`. Получи также последнюю версию этого документа из ветки `arena/beb4cad1-simgame`; не затирай локальные изменения. Полные шаги: `City/PAUSE_DISTRICT_INTEGRATION.md`.
 
-## 1. Получить изменения
+**Файлы:** перенеси `City/Quarter/`, `City/UnityAdapter/`, `City/Tests/*.cs` и их asmdef, `City/PauseMenu/`, `City/PauseInputSystem/PauseKeyboardInput.cs` вне asmdef и `City/PauseTests/`. Не копируй csproj в Assets. Карта и Quarter250 не переписаны.
 
-Ветка `arena/02138937-simgame`, ожидаемый коммит `e34a244` или новее. Команды — в `City/CODEX_HANDOFF.md`, раздел «Git». Не удаляй локальные изменения.
+**Проверки:** `python3 City/Tools/district_layout_check.py`; при наличии SDK 8 — `dotnet build City/Tests/Console.csproj` и `dotnet run --project City/Tests/Console.csproj`. Unity Test Runner: EditMode `QuarterNUnitTests`, PlayMode `LifeFromZero.City.Pause.Tests`. Остановись при первой существенной ошибке; исправляй только подтверждённую причину.
 
-## 2. Проверки по порядку
+**Карта:** в существующем Unity-проекте создай отдельную пустую `DistrictTest.unity`, добавь `CityBootstrap`: `district750`, seed `1904`, Generate On Start и Add Colliders включены. Запусти Play, проверь Console, отчёт, коллайдеры и проходы. Подробности и материалы — в интеграционном документе.
 
-1. `python3 City/Tools/district_layout_check.py` — ожидается exit 0 и «OK».
-2. `dotnet build City/Tests/Console.csproj`
-3. `dotnet run --project City/Tests/Console.csproj` — ожидается exit 0.
+**Меню:** создай отдельный корневой `Pause` с `PauseController`; подключи существующий маршрутизатор окон/ввода через `PauseIntegration`, реальные данные — через `PauseDataSource`. Без интеграции открытие намеренно запрещено. При отсутствии менеджера настрой `StandalonePauseIntegration` и `PauseKeyboardInput` по инструкции. Проверь Esc, время, курсор, блокировку управления, отсутствие дубликатов при смене сцен и недоступные действия. Только P вызывает телефон из паузы; другие клавиши не назначать.
 
-Если .NET недоступен — не устанавливай его, отметь «не запущено».
-
-**Если проверка упала — остановись после первой существенной ошибки.** Сообщи её текст и файл. Не запускай остальные проверки «на всякий случай».
-
-## 3. Исправления
-
-Исправляй только первую причину ошибки, минимально. Известные риски — `City/CODEX_RISKS.md`. Не переписывай генератор и не меняй координаты. Если тест District750 падает, сверь его с Python-зеркалом (`City/Tools/district_layout_check.py`).
-
-## 4. Unity
-
-Порядок шагов — `City/CODEX_UNITY_STEPS.md`. Не создавай новый проект. Если Unity недоступна — пропусти и отметь это в отчёте.
-
-## 5. Проверка результата
-
-- Сборка и тесты: exit 0.
-- Python: «OK».
-- Unity (если доступна): компиляция без ошибок, `QuarterNUnitTests` зелёный, `DistrictTest.unity` строит город без ошибок.
-
-## 6. Запрещено менять
-
-- Размер 750×750, планировку, координаты, число домов, seed 1904.
-- Economy, Delivery, Debts, Phone, Apartment67, CityTest.
-- Новые механики, интерьеры, зависимости, файлы сверх необходимого.
-- Ветку, PR #10 (не сливать).
-
-## 7. Вернуть в конце
-
-- Коммит и push в `arena/02138937-simgame`, с SHA.
-- Таблицу: проверка, результат (passed / failed / не запущено), первая ошибка.
-- Число тестов и список упавших.
-- Слова «всё работает» только после реального запуска.
+Сравни меню с приложенным `Pause Menu.PNG`, карту с `District750.PNG`; файлы референсов не лежат в Git. Проверь 1920×1080 и 2560×1440. Не менять CityTest, Apartment67, Economy, Delivery, Debts, Phone, планировку и seed; не создавать систему сохранений. Не заявляй успешную компиляцию, визуальное совпадение или FPS без проверки. После отчёта остановись.
