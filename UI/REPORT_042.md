@@ -22,12 +22,23 @@
 Пока строки из этой таблицы не закрыты, интерфейс **нельзя** называть
 «подключённым к игре». Он готов как код и как логика.
 
+## 1а. Что подключено к существующим системам (без копий правил)
+
+| Система игры | Как подключена | Что осталось |
+|---|---|---|
+| `City.Pause` (`PauseController`/`PauseView`/`PauseKeyboardInput`) | `UiBootstrap` находит `PauseIntegration`, выключает вторые клавиши и второй `Time.timeScale`, действия меню идут в `PauseIntegration.Execute` | оставить одно меню паузы в сцене |
+| `PauseDataSource` (время, деньги, потребности, цели) | `PauseUiSnapshotSource` читает `Read()` и подписывается на `Changed` | иметь наследника `PauseDataSource` в сцене |
+| `Jobs.Delivery` (`IDeliveryService`) | `DeliveryServiceBridge`: список заказов, команды `accept/pickup/complete/cancel/abandon`, координаты точки из `QuarterPlan` | наследник `DeliveryServiceHost` + clock/payout/location адаптеры |
+| Камера/игрок | `UiGameBridge`: `Camera.main` → любая включённая камера, честный `false`, если игрока нет | назначить `Player` и `Player Input Behaviours` |
+| Сохранение/загрузка/меню | `UiMenuActions` + `IUiGameAction`; без исполнителя кнопка неактивна | реализовать `IUiGameAction` (если сохранения есть) |
+| `QuarterPlan` (District750) | `IQuarterPlanSource` (без цикла сборок), `UiBootstrap.SetDistrictPlan` | ничего |
+
 ## 2. Проверки — что именно прогнано
 
 ```
 python3 UI/Tools/checkui.py       → COMPILE: OK errors=0
 python3 UI/Tools/checkeditor.py   → COMPILE: OK errors=0   (UI + Editor-установщик)
-python3 UI/Tools/runtests.py      → 92/92 PASS, EXIT CODE 0
+python3 UI/Tools/runtests.py      → 98/98 PASS, EXIT CODE 0
 ```
 
 Что это доказывает: код синтаксически и типово корректен против стабов Unity,
