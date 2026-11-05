@@ -115,7 +115,40 @@ namespace LifeFromZero.UI.Runtime
 
         private void OnDestroy()
         {
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
             if (_router != null && Router == _router) Router = null;
+        }
+
+        private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene,
+            UnityEngine.SceneManagement.LoadSceneMode mode)
+        {
+            if (_router == null) return;
+
+            // Мосты живут в сцене вместе с игрой: после перехода это другие объекты.
+            _deliveryBridge = null;
+            _existingPause = null;
+            _plan = null;
+            _mapGeometry = null;
+
+            worldAdapter = null;
+            snapshotSource = null;
+            districtSource = null;
+
+            Report = new UiWiringReport();
+            ResolveWorld();
+            ResolveSnapshot();
+            ResolvePauseOwner();
+            ResolveDistrict();
+            if (createScreens) CreateScreens();
+            WirePhone();
+            WireMap();
+
+            // Роутер хранит ссылки на адаптеры: без Configure он остался бы с объектами
+            // уничтоженной сцены и не увидел бы новую игру.
+            _router.Configure(worldAdapter, snapshotSource, Resolve<PhoneScreen>(), _map,
+                Resolve<HudScreen>(), Resolve<PauseMenuScreen>());
+
+            if (logReport) Debug.Log("[UiBootstrap] после смены сцены: " + Report.Summary());
         }
 
         /// <summary>Точка входа для существующего загрузчика игры (если компонент не на сцене).</summary>
@@ -154,6 +187,11 @@ namespace LifeFromZero.UI.Runtime
 
             Router = _router;
             if (logReport) Debug.Log("[UiBootstrap] " + Report.Summary());
+
+            // Смена сцен (Apartment67 ↔ District750) приходит сюда: план района и
+            // мосты переустанавливаются, а не остаются от старой сцены.
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
         }
 
         private UiRouter ResolveRouter()

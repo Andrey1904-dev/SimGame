@@ -490,6 +490,28 @@ namespace LifeFromZero.UI.Runtime
 
             ReleaseAllLocks();
             _timeScalePaused = false;
+
+            // В новой сцене другие адаптеры (Apartment67 ↔ District750). Ищем их сразу:
+            // иначе после перехода карта и HUD работали бы с объектами старой сцены.
+            RebindSceneServices();
+        }
+
+        /// <summary>
+        /// Перепривязать источники данных и мир к текущей сцене. Уже привязанные и
+        /// живые объекты остаются (их не пересоздаём), недостающие — ищутся заново.
+        /// </summary>
+        public void RebindSceneServices()
+        {
+            UiWorldAdapter freshWorld = world;
+            if (freshWorld == null || freshWorld.gameObject == null)
+                freshWorld = FindAnyObjectByType<UiWorldAdapter>();
+
+            UiSnapshotSource freshSource = snapshotSource;
+            if (freshSource == null || freshSource.gameObject == null)
+                freshSource = FindAnyObjectByType<UiSnapshotSource>();
+
+            if (freshWorld == world && freshSource == snapshotSource) return;
+            Configure(freshWorld, freshSource);
         }
 
         // ------------------------------------------------------------------ удобные фасады
