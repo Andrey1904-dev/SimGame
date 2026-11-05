@@ -23,6 +23,10 @@ namespace LifeFromZero.Setup
         private Vector2 resultScroll;
         private IntegrationPlan lastPlan;
         private bool showCandidates;
+        private MigrationReport migration;
+        private MigrationPlan lastMigration;
+        private Vector2 migrationScroll;
+        private bool showMigration;
 
         public static void ShowWindow()
         {
@@ -49,6 +53,78 @@ namespace LifeFromZero.Setup
             {
                 report = null;
                 Debug.LogError("[LFZ-INTEGRATE] обнаружение не удалось: " + e.Message);
+            }
+        }
+
+        /// <summary>Квартира №67 и переход Quarter250 → District750 (ТЗ #039, финальное дополнение).</summary>
+        private void DrawHomeAndMigration()
+        {
+            EditorGUILayout.LabelField("Квартира №67 и миграция Quarter250 → District750", EditorStyles.boldLabel);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Сцена квартиры (имя без .unity):", GUILayout.Width(240f));
+                LifeFromZeroGameIntegration.ApartmentSceneName =
+                    EditorGUILayout.TextField(LifeFromZeroGameIntegration.ApartmentSceneName, GUILayout.Width(260f));
+            }
+            EditorGUILayout.LabelField("Имя сцены квартиры не угадывается: пусто — переход в квартиру выключен.",
+                                       EditorStyles.miniLabel);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Привязать квартиру №67 в сцене района"))
+                    LifeFromZeroGameIntegration.BindHomeToDistrictScene(false);
+
+                if (GUILayout.Button("Диагностика миграции"))
+                {
+                    migration = LifeFromZeroMigration.Diagnose();
+                    showMigration = true;
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(selectedScene)))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("District750 = основной район (dry-run)"))
+                        lastMigration = LifeFromZeroMigration.Migrate(selectedScene, true);
+
+                    if (GUILayout.Button("Применить переход на District750"))
+                    {
+                        bool proceed = EditorUtility.DisplayDialog(
+                            "Life From Zero — миграция",
+                            "Переключить сцену на District750 как основной район:\n" + selectedScene +
+                            "\n\nПеред изменением создаётся резервная копия сцены. Quarter250 не удаляется. Продолжить?",
+                            "Переключить", "Отмена");
+                        if (proceed) lastMigration = LifeFromZeroMigration.Migrate(selectedScene, false);
+                    }
+                }
+            }
+
+            if (migration != null && showMigration)
+            {
+                EditorGUILayout.HelpBox("Диагностика: рисков " + migration.Risks.Count +
+                                        ", генераторов " + migration.Bootstraps.Count +
+                                        ", совпадений в коде " + migration.CodeHits.Count +
+                                        (string.IsNullOrEmpty(migration.ReportPath) ? "" : "\nОтчёт: " + migration.ReportPath),
+                                        migration.Risks.Count > 0 ? MessageType.Warning : MessageType.Info);
+            }
+
+            if (lastMigration != null)
+            {
+                EditorGUILayout.HelpBox(lastMigration.Summary(), lastMigration.Blocked ? MessageType.Error : MessageType.Info);
+                migrationScroll = EditorGUILayout.BeginScrollView(migrationScroll, GUILayout.Height(150f));
+                for (int i = 0; i < lastMigration.Blockers.Count; i++)
+                    EditorGUILayout.HelpBox("БЛОКЕР: " + lastMigration.Blockers[i], MessageType.Error);
+                for (int i = 0; i < lastMigration.Changes.Count; i++)
+                    EditorGUILayout.LabelField("• " + lastMigration.Changes[i], EditorStyles.wordWrappedMiniLabel);
+                for (int i = 0; i < lastMigration.Findings.Count; i++)
+                    EditorGUILayout.LabelField("· " + lastMigration.Findings[i], EditorStyles.wordWrappedMiniLabel);
+                for (int i = 0; i < lastMigration.Actions.Count; i++)
+                    EditorGUILayout.LabelField((i + 1) + ") " + lastMigration.Actions[i], EditorStyles.wordWrappedMiniLabel);
+                if (!string.IsNullOrEmpty(lastMigration.ReportPath))
+                    EditorGUILayout.HelpBox("Отчёт: " + lastMigration.ReportPath, MessageType.None);
+                EditorGUILayout.EndScrollView();
             }
         }
 
@@ -136,6 +212,9 @@ namespace LifeFromZero.Setup
                     }
                 }
             }
+
+            EditorGUILayout.Space();
+            DrawHomeAndMigration();
 
             showCandidates = EditorGUILayout.Foldout(showCandidates, "Отчёт обнаружения (полный)");
             if (showCandidates)

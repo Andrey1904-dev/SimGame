@@ -22,7 +22,7 @@ namespace LifeFromZero.City.Quarter.Tests
             var suite = new TestSuite();
             // --- базовые свойства карты ---
             suite.Add("District750: макет помечен, размер 750 м", LayoutAndSize);
-            suite.Add("District750: стартовая квартира №67 в bld-n4 (номер квартиры, не дом)", StartApartment);
+            suite.Add("District750: квартира №67 в юго-западном доме северного квартала, южнее площадки", StartApartment);
             suite.Add("District750: число точек карты и доставок совпадает с Python-зеркалом (24 и 46)", MirrorCounts);
             // --- правила геометрии по данным плана ---
             suite.Add("District750: геометрия без нарушений (полный набор правил)", FullRuleSetPasses);
@@ -81,16 +81,45 @@ namespace LifeFromZero.City.Quarter.Tests
             AreEqual(1904, plan.Seed, "Seed сохраняется");
         }
 
+        /// <summary>
+        /// Квартира №67 (карта района v1.1): дом — самый юго-западный многоквартирный дом
+        /// Северного квартала, стоящий южнее футбольной площадки. Дом выбирает генератор
+        /// по данным раскладки (PickPlayerHomeId), тест проверяет результат этого правила,
+        /// а не зашитое имя здания.
+        /// </summary>
         private static void StartApartment()
         {
             QuarterPlan plan = District();
             IsTrue(plan.PlayerHome != null, "Стартовая квартира задана");
-            AreEqual("bld-n4", plan.PlayerHome.BuildingId, "Стартовая квартира — в северном доме bld-n4");
+            IsTrue(plan.PlayerHome.BuildingId == "bld-n3",
+                "Квартира №67 — в юго-западном доме северного квартала (bld-n3), а не в "
+                + plan.PlayerHome.BuildingId);
+
+            BuildingInfo home = plan.Buildings.First(b => b.Id == plan.PlayerHome.BuildingId);
+            IsTrue(home.IsPlayerHome, "Здание помечено как дом игрока");
+            IsTrue(home.Center.Z > 600f, "Дом в северном квартале");
+            // Площадка северного двора: прямоугольник (203; 655)-(217; 665).
+            IsTrue(home.Footprint.MaxZ < 655f, "Дом южнее футбольной площадки");
+            for (int i = 0; i < plan.Buildings.Count; i++)
+            {
+                BuildingInfo other = plan.Buildings[i];
+                if (other.Id == home.Id || other.Center.Z <= 600f) continue;
+                IsTrue(!(other.Center.X <= home.Center.X + 0.01f && other.Center.Z <= home.Center.Z + 0.01f),
+                    "Нет дома западнее и южнее одновременно: " + other.Id);
+            }
+
             // Номер читается из данных маркера, а не из константы.
             PlacedObject marker = plan.OfType(QuarterObjectTypes.PlayerHomeMarker).FirstOrDefault();
             IsTrue(marker != null, "Маркер квартиры есть в данных");
             AreEqual("67", marker.Param("apartment"), "Маркер несёт номер квартиры 67");
-            AreEqual("bld-n4", marker.Param("buildingId"), "Маркер привязан к bld-n4");
+            AreEqual(home.Id, marker.Param("buildingId"), "Маркер привязан к дому квартиры");
+
+            // Дверь и выход: по одному объекту, выход в 2 м и вне стен дома (карта v1.1).
+            AreEqual(1, plan.CountOfType(QuarterObjectTypes.PlayerHomeDoor), "Объект двери квартиры");
+            AreEqual(1, plan.CountOfType(QuarterObjectTypes.PlayerHomeExit), "Объект выхода во двор");
+            IsFalse(home.Footprint.Contains(plan.PlayerHome.CourtyardExit.Ground), "Выход во двор вне стен");
+            float doorToExit = plan.PlayerHome.EntranceDoor.Ground.DistanceTo(plan.PlayerHome.CourtyardExit.Ground);
+            IsTrue(Math.Abs(doorToExit - 2f) < 0.05f, "Выход в 2 м от двери: " + doorToExit.ToString("0.##"));
         }
 
         private static void MirrorCounts()

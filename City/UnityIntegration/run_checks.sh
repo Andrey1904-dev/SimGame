@@ -107,7 +107,8 @@ else
         objects=$(grep -m 1 '^objects' "$LOG1" | awk '{print $2}')
         deliveries=$(grep -m 1 '^deliveries' "$LOG1" | awk '{print $2}')
         unreachable=$(grep -m 1 '^unreachable' "$LOG1" | awk '{print $2}')
-        record "PASS" 1 "Python-генератор District750" "objects=$objects deliveries=$deliveries unreachable=$unreachable"
+        home=$(grep -m 1 '^player_home' "$LOG1" | sed 's/^player_home[[:space:]]*//')
+        record "PASS" 1 "Python-генератор District750" "objects=$objects deliveries=$deliveries unreachable=$unreachable; квартира №67: $home"
     else
         record "FAIL" 1 "Python-генератор District750" "см. $(basename "$LOG1")"
     fi
@@ -144,7 +145,9 @@ else
         "Assets/City/UnityIntegration/Editor/LifeFromZeroDiscovery.cs" \
         "Assets/City/UnityIntegration/Editor/LifeFromZeroGameIntegration.cs" \
         "Assets/City/UnityIntegration/Editor/LifeFromZeroIntegrateWindow.cs" \
-        "Assets/City/UnityIntegration/Runtime/District750Link.cs" ; do
+        "Assets/City/UnityIntegration/Editor/LifeFromZeroMigration.cs" \
+        "Assets/City/UnityIntegration/Runtime/District750Link.cs" \
+        "Assets/City/UnityIntegration/Runtime/PlayerHomeAnchor.cs" ; do
         total=$((total + 1))
         if [ -f "$UNITY_PROJECT/$rel" ]; then
             printf 'OK   %s\n' "$rel" >>"$LOG2"

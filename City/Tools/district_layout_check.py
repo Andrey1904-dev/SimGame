@@ -50,6 +50,10 @@ points = []     # POI: dict(id,type,name,center,rect,entrances[(x,z)],interactio
 entrance_pts = []  # точки, до которых должен дойти пешеход (входы/точки доставки)
 
 
+def fmt_num(v):
+    return ('%g' % round(v, 2))
+
+
 def rect_c(cx, cz, sx, sz, rot=0):
     if rot in (90, 270):
         sx, sz = sz, sx
@@ -195,9 +199,9 @@ def bench(x, z, rot=0):
     obj('bench', x, 0, z, rot, 2.0, 0.6, 0.6)
 
 
-def playground(cx, cz, sx, sz):
+def playground(cx, cz, sx, sz, **params):
     zone('playground', rect_c(cx, cz, sx, sz))
-    obj('playground', cx, 0, cz, 0, sx, 1.2, sz)
+    obj('playground', cx, 0, cz, 0, sx, 1.2, sz, **params)
 
 
 # ======================= СЦЕНА =======================
@@ -323,19 +327,46 @@ def emit_streets(nodes, roads):
     lawn('roundabout.island', rect_c(rx, rz, 7.0, 7.0))           # центральный газон кольца (ground)
 
 
+# ---------- северный двор: футбольная площадка и дом квартиры №67 (карта v1.1) ----------
+NORTH_PITCH = rect_c(210, 660, 14, 10)
+
+
+def pick_player_home_id(buildings, pitch):
+    """Зеркало DistrictMapGenerator.PickPlayerHomeId.
+    Кандидаты — дома южнее нижней границы площадки (center Z < pitch[1]);
+    из них самый западный (минимальный X). Ноль кандидатов или ничья по X — ошибка."""
+    south = [b for b in buildings if b[2] < pitch[1]]
+    if not south:
+        raise SystemExit('player.home: нет дома южнее футбольной площадки')
+    west = min(b[1] for b in south)
+    cand = [b[0] for b in south if abs(b[1] - west) < 0.01]
+    if len(cand) != 1:
+        raise SystemExit('player.home: неоднозначный юго-западный дом: ' + ', '.join(cand))
+    return cand[0]
+
+
 def build_district():
     nodes, roads = build_scene()
     emit_streets(nodes, roads)
-    # ---------- Северный квартал (4 дома, двор с площадкой) ----------
+    # ---------- Северный квартал (4 дома, двор с футбольной площадкой) ----------
     lawn('yard-north-w', (160, 640, 260, 680))
-    playground(210, 660, 14, 10)
+    playground(210, 660, 14, 10, sport='football', kind='pitch')
     bench(180, 650); bench(240, 670)
     for (tx, tz) in ((170, 646), (250, 646), (172, 674), (248, 676)):
         tree(tx, tz, 3.2)
-    residential('bld-n1', 'panel5', 210, 690, 0, 30, 'S')
-    residential('bld-n3', 'panel5', 210, 630, 0, 30, 'N')
-    residential('bld-n2', 'brick3', 345, 690, 0, 24, 'S')
-    residential('bld-n4', 'panel5', 345, 630, 0, 36, 'N', is_home=True)
+    # Квартира №67 (карта района v1.1): самый юго-западный дом северного квартала,
+    # стоящий южнее футбольной площадки, — bld-n3 (210; 630). Правило выбора то же,
+    # что в DistrictMapGenerator.PickPlayerHomeId и проверяется ниже (check_home).
+    north_home = pick_player_home_id([
+        ('bld-n1', 210, 690, 'panel5', 0, 30, 'S'),
+        ('bld-n3', 210, 630, 'panel5', 0, 30, 'N'),
+        ('bld-n2', 345, 690, 'brick3', 0, 24, 'S'),
+        ('bld-n4', 345, 630, 'panel5', 0, 36, 'N'),
+    ], NORTH_PITCH)
+    residential('bld-n1', 'panel5', 210, 690, 0, 30, 'S', is_home=(north_home == 'bld-n1'))
+    residential('bld-n3', 'panel5', 210, 630, 0, 30, 'N', is_home=(north_home == 'bld-n3'))
+    residential('bld-n2', 'brick3', 345, 690, 0, 24, 'S', is_home=(north_home == 'bld-n2'))
+    residential('bld-n4', 'panel5', 345, 630, 0, 36, 'N', is_home=(north_home == 'bld-n4'))
     lot('park-north-e', (286, 644, 340, 662), 6)
     lot('park-north-e2', (352, 644, 404, 662), 6)
     lawn('yard-north-e', (280, 664, 410, 680))
@@ -565,6 +596,50 @@ def check_all():
     homes = [b for b in mkd if b['home']]
     if len(homes) != 1: errors.append('player home count %d' % len(homes))
 
+    # 4a. Квартира №67 (карта района v1.1): дом — юго-западный в северном квартале,
+    #     южнее футбольной площадки; дверь и выход на месте, вне стен, во дворе.
+    if len(homes) == 1:
+        home = homes[0]
+        hx, hz = home['center']
+        if hz <= 600: errors.append('player.home: дом не в северном квартале (Z=%s)' % hz)
+        if home['rect'][3] >= NORTH_PITCH[1]:
+            errors.append('player.home: дом не южнее футбольной площадки (%s >= %s)'
+                          % (home['rect'][3], NORTH_PITCH[1]))
+        sw = [b for b in north if b['center'][1] < NORTH_PITCH[1]]
+        west = min(b['center'][0] for b in sw)
+        if abs(hx - west) > 0.01:
+            errors.append('player.home: дом не самый западный из южных (X=%s, ожидалось %s)' % (hx, west))
+        if len([b for b in sw if b['center'][1] == min(c['center'][1] for c in sw)]) < 1:
+            errors.append('player.home: в квартале нет юго-западного дома')
+        # дверь и выход: по одному маркеру, вне стен, выход дальше от стены
+        doors = [o for o in objects if o['type'] == 'player.home.door']
+        exits = [o for o in objects if o['type'] == 'player.home.exit']
+        marks = [o for o in objects if o['type'] == 'player.home']
+        if len(doors) != 1: errors.append('player.home.door count %d' % len(doors))
+        if len(exits) != 1: errors.append('player.home.exit count %d' % len(exits))
+        if len(marks) != 1: errors.append('player.home marker count %d' % len(marks))
+        if doors and exits:
+            d, e = (doors[0]['x'], doors[0]['z']), (exits[0]['x'], exits[0]['z'])
+            if d[0] < home['rect'][0] or d[0] > home['rect'][2] or \
+               home['rect'][1] < d[1] < home['rect'][3]:
+                errors.append('player.home.door внутри стен дома: %s' % (d,))
+            if home['rect'][1] < d[1] < home['rect'][3]:
+                errors.append('player.home.door на глубине дома: %s' % (d,))
+            if abs((e[0] - d[0]) ** 2 + (e[1] - d[1]) ** 2 - 4.0) > 0.05:
+                errors.append('player.home.exit не в 2 м от двери: %s -> %s' % (d, e))
+            if home['rect'][1] <= e[1] <= home['rect'][3]:
+                errors.append('player.home.exit внутри дома: %s' % (e,))
+            for name, r in solids:
+                if r is home['rect']:
+                    continue
+                if r[0] <= e[0] <= r[2] and r[1] <= e[1] <= r[3]:
+                    errors.append('player.home.exit внутри %s: %s' % (name, e))
+            # выход — в сторону двора (к площадке), а не под дом
+            if not (d[1] < e[1] < NORTH_PITCH[1]):
+                errors.append('player.home.exit не между домом и площадкой: %s' % (e,))
+            if e[1] >= NORTH_PITCH[3] or e[0] < NORTH_PITCH[0] - 60:
+                errors.append('player.home.exit вне северного двора: %s' % (e,))
+
     # 5. Обязательные объекты
     need = {'com-mall': 'ТЦ', 'shop-01': 'продукты', 'com-cafe': 'кафе', 'com-restaurant': 'ресторан',
             'com-clothing': 'одежда', 'com-hardware': 'строймаркет', 'com-pawnshop': 'ломбард',
@@ -655,6 +730,9 @@ def check_all():
         if not (0 <= o['x'] <= SIZE and 0 <= o['z'] <= SIZE):
             errors.append('object outside map: %s (%.1f,%.1f)' % (o['type'], o['x'], o['z']))
 
+    home = homes[0] if len(homes) == 1 else None
+    door_o = next((o for o in objects if o['type'] == 'player.home.door'), None)
+    exit_o = next((o for o in objects if o['type'] == 'player.home.exit'), None)
     report = dict(
         entrances_checked=len(entrance_pts), unreachable=len(unreachable),
         walkable_cells=sum(1 for x in range(N) for z in range(N) if seen[x][z]),
@@ -664,6 +742,12 @@ def check_all():
         trees=sum(1 for o in objects if o['type'] == 'tree'),
         lamps=sum(1 for o in objects if o['type'] == 'lamp.street'),
         stalls=sum(1 for o in objects if o['type'] == 'parking.stall'),
+        player_home=('%s (%s;%s) door %s exit %s' % (
+            home['id'], fmt_num(home['center'][0]), fmt_num(home['center'][1]),
+            ('(%s;%s)' % (fmt_num(door_o['x']), fmt_num(door_o['z']))) if door_o else '—',
+            ('(%s;%s)' % (fmt_num(exit_o['x']), fmt_num(exit_o['z']))) if exit_o else '—'))
+            if home else 'не задан',
+        north_pitch='(%s;%s)-(%s;%s) football 14x10' % tuple(fmt_num(v) for v in NORTH_PITCH),
     )
     return errors, report
 

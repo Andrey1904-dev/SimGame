@@ -111,6 +111,9 @@ namespace LifeFromZero.Setup
         {
             string startScene = CommandLineValue("-lfzStartScene");
             bool dryRun = CommandLineHas("-lfzDryRun");
+            string apartmentScene = CommandLineValue("-lfzApartmentScene");
+            if (!string.IsNullOrWhiteSpace(apartmentScene))
+                ApartmentSceneName = apartmentScene.Trim();
 
             if (string.IsNullOrEmpty(startScene))
             {
@@ -140,6 +143,226 @@ namespace LifeFromZero.Setup
             for (int i = 0; i < plan.Actions.Count; i++)
                 Debug.Log(LogTag + " ACTION " + plan.Actions[i]);
         }
+
+        /// <summary>
+        /// Имя сцены квартиры для PlayerHomeAnchor. Задаётся явно (-lfzApartmentScene / поле окна):
+        /// инструмент его НЕ угадывает — при пустом значении переход в квартиру остаётся выключенным.
+        /// </summary>
+        public static string ApartmentSceneName { get; set; } = "";
+
+        /// <summary>
+        /// Меню: добавить/обновить PlayerHomeAnchor в уже созданной сцене района District750.
+        /// Трогает только собственную сцену района (Assets/_Project/Scenes/District750.unity),
+        /// делает резервную копию файла сцены и пишет отчёт.
+        /// </summary>
+        [MenuItem("Tools/Life From Zero/Bind apartment 67 in district scene", false, 11)]
+        public static void BindHomeFromMenu()
+        {
+            bool ok = BindHomeToDistrictScene(false);
+            EditorUtility.DisplayDialog("Life From Zero — квартира №67",
+                ok ? "Привязка квартиры №67 обновлена в " + DistrictScenePath
+                   : "Не удалось: см. Console (" + LogTag + ")", "OK");
+        }
+
+        /// <summary>Batch-точка привязки: -executeMethod …BindHomeBatch [-lfzApartmentScene <имя>].</summary>
+        public static void BindHomeBatch()
+        {
+            string apartmentScene = CommandLineValue("-lfzApartmentScene");
+            if (!string.IsNullOrWhiteSpace(apartmentScene))
+                ApartmentSceneName = apartmentScene.Trim();
+
+            if (!BindHomeToDistrictScene(false))
+                throw new Exception("Привязка квартиры №67 не выполнена: см. лог " + LogTag);
+            Debug.Log(LogTag + " RESULT: OK home-anchor scene=" + DistrictScenePath);
+        }
+
+        /// <summary>
+        /// Проверяет привязку квартиры №67 по данным генератора и ставит PlayerHomeAnchor в сцену района.
+        /// Сцену и координаты не угадывает: дом выбирает DistrictMapGenerator, точки ставит компонент.
+        /// </summary>
+        public static bool BindHomeToDistrictScene(bool dryRun)
+        {
+            var plan = new IntegrationPlan { DryRun = dryRun, StartScenePath = DistrictScenePath };
+            if (!VerifyHomePlan(plan))
+            {
+                Debug.LogError(LogTag + " BLOCKED: " + string.Join("; ", plan.Blockers.ToArray()));
+                return false;
+            }
+            for (int i = 0; i < plan.Findings.Count; i++)
+                Debug.Log(LogTag + " " + plan.Findings[i]);
+
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(DistrictScenePath) == null)
+            {
+                Debug.LogError(LogTag + " BLOCKED: сцена района не найдена: " + DistrictScenePath +
+                               ". Выполните Tools → Life From Zero → Integrate Into Game.");
+                return false;
+            }
+
+            Scene scene = SceneManager.GetSceneByPath(DistrictScenePath);
+            bool alreadyOpen = scene.IsValid() && scene.isLoaded;
+            bool openedByUs = false;
+            if (!alreadyOpen)
+            {
+                scene = EditorSceneManager.OpenScene(DistrictScenePath, OpenSceneMode.Additive);
+                openedByUs = true;
+            }
+
+            try
+            {
+                CityBootstrap bootstrap = FindFirst<CityBootstrap>(scene);
+                if (bootstrap == null)
+                {
+                    Debug.LogError(LogTag + " BLOCKED: в сцене района нет CityBootstrap: " + DistrictScenePath);
+                    return false;
+                }
+
+                if (dryRun)
+                {
+                    Debug.Log(LogTag + " DRY-RUN: PlayerHomeAnchor будет добавлен в " + DistrictScenePath +
+                              " (квартира: " + ApartmentSceneName + ")");
+                    return true;
+                }
+
+                Component anchor = FindByTypeName(scene, "PlayerHomeAnchor");
+                if (anchor == null)
+                {
+                    anchor = LifeFromZeroSetup.TryAddComponentByTypeName(bootstrap.gameObject, "PlayerHomeAnchor");
+                    if (anchor == null)
+                    {
+                        Debug.LogError(LogTag + " BLOCKED: тип PlayerHomeAnchor не найден — выполните install_to_unity.sh --apply");
+                        return false;
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(ApartmentSceneName))
+                    LifeFromZeroSetup.SetStringField(anchor, "apartmentSceneName", ApartmentSceneName);
+
+                if (alreadyOpen && !scene.isDirty)
+                {
+                    // Сцену открыл пользователь: сохраняем как обычно, но без бэкапа не меняем.
+                    if (!CreateSceneBackup(plan, DistrictScenePath)) return false;
+                    EditorUtility.SetDirty(anchor);
+                    EditorSceneManager.MarkSceneDirty(scene);
+                    return EditorSceneManager.SaveScene(scene);
+                }
+
+                if (!CreateSceneBackup(plan, DistrictScenePath)) return false;
+                EditorUtility.SetDirty(anchor);
+                EditorSceneManager.MarkSceneDirty(scene);
+                bool saved = EditorSceneManager.SaveScene(scene);
+                Debug.Log(LogTag + (saved ? " PlayerHomeAnchor сохранён в " + DistrictScenePath
+                                          : " ошибка сохранения " + DistrictScenePath));
+                return saved;
+            }
+            finally
+            {
+                if (openedByUs && scene.IsValid() && scene.isLoaded)
+                    EditorSceneManager.CloseScene(scene, true);
+            }
+        }
+
+        /// <summary>Копия файла сцены перед изменением (каталог вне Assets).</summary>
+        private static bool CreateSceneBackup(IntegrationPlan plan, string scenePath)
+        {
+            try
+            {
+                string projectRoot = LifeFromZeroDiscovery.ProjectRoot();
+                string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+                string folder = Path.Combine(projectRoot, OutputFolder, "backups", stamp);
+                Directory.CreateDirectory(folder);
+                string source = AbsolutePath(scenePath);
+                if (!File.Exists(source)) return true; // сцена только что создана — копировать нечего
+                string target = Path.Combine(folder, scenePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(target) ?? folder);
+                File.Copy(source, target, true);
+                if (Hash(source) != Hash(target))
+                {
+                    Debug.LogError(LogTag + " BLOCKED: копия сцены не совпала по содержимому — изменение отменено");
+                    return false;
+                }
+                plan.BackupDir = folder;
+                Debug.Log(LogTag + " резервная копия сцены: " + target);
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError(LogTag + " BLOCKED: резервная копия сцены не создана: " + e.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Дом квартиры №67 по данным DistrictMapGenerator (карта района v1.1): самый юго-западный
+        /// дом Северного квартала (Z > 600), южнее футбольной площадки. Проверка без Unity-сцены.
+        /// </summary>
+        internal static bool VerifyHomePlan(IntegrationPlan plan)
+        {
+            QuarterPlan district;
+            try
+            {
+                district = DistrictMapGenerator.Generate(LifeFromZeroSetup.Seed);
+            }
+            catch (Exception e)
+            {
+                plan.Blockers.Add("генератор District750 не построил план: " + e.Message);
+                return false;
+            }
+
+            PlayerHomeInfo home = district.PlayerHome;
+            if (home == null)
+            {
+                plan.Blockers.Add("генератор District750 не задаёт player.home — квартира №67 не привязана к дому");
+                return false;
+            }
+
+            BuildingInfo homeBuilding = null;
+            BuildingInfo southWest = null;
+            int northCount = 0;
+            for (int i = 0; i < district.Buildings.Count; i++)
+            {
+                BuildingInfo b = district.Buildings[i];
+                if (b.Center.Z <= 600f) continue;
+                northCount++;
+                if (string.Equals(b.Id, home.BuildingId, StringComparison.Ordinal)) homeBuilding = b;
+                if (southWest == null ||
+                    b.Center.Z < southWest.Center.Z - 0.01f ||
+                    (Math.Abs(b.Center.Z - southWest.Center.Z) <= 0.01f && b.Center.X < southWest.Center.X - 0.01f))
+                    southWest = b;
+            }
+
+            if (homeBuilding == null)
+            {
+                plan.Blockers.Add("квартира №67 привязана к дому " + home.BuildingId +
+                                  ", которого нет в северном квартале плана");
+                return false;
+            }
+            if (southWest != null && !string.Equals(southWest.Id, home.BuildingId, StringComparison.Ordinal))
+            {
+                plan.Blockers.Add("квартира №67 привязана к " + home.BuildingId + ", а юго-западный дом северного квартала — " +
+                                  southWest.Id + " (" + Format(homeBuilding.Center) + " против " + Format(southWest.Center) +
+                                  "). Привязка не соответствует карте района v1.1.");
+                return false;
+            }
+
+            float dx = home.CourtyardExit.X - home.EntranceDoor.X;
+            float dz = home.CourtyardExit.Z - home.EntranceDoor.Z;
+            float distance = (float)Math.Sqrt(dx * dx + dz * dz);
+            plan.Findings.Add("квартира №67: дом " + home.BuildingId + " (" + homeBuilding.Floors + " эт., центр " +
+                              Format(homeBuilding.Center) + "), домов северного квартала: " + northCount);
+            plan.Findings.Add("квартира №67: дверь " + Format(home.EntranceDoor) + ", выход во двор " +
+                              Format(home.CourtyardExit) + " (" + distance.ToString("0.##", CultureInfo.InvariantCulture) + " м от двери)");
+            if (Math.Abs(distance - 2f) > 0.05f)
+                plan.Findings.Add("ВНИМАНИЕ: выход из квартиры не в 2 м от двери — проверьте раскладку");
+            plan.Actions.Add("Codex: в PlayerHomeAnchor задать Apartment Scene Name (имя существующей сцены квартиры) " +
+                             "и вызвать OpenApartment из двери подъезда, ReturnToDistrict — из выхода квартиры");
+            plan.Actions.Add("Codex: спавн при возврате из квартиры — PlayerHomeAnchor.SpawnPosition (точка player.home.exit)");
+            return true;
+        }
+
+        private static string Format(Vec2 v) => "(" + v.X.ToString("0.##", CultureInfo.InvariantCulture) + "; " +
+                                                v.Z.ToString("0.##", CultureInfo.InvariantCulture) + ")";
+
+        private static string Format(Vec3 v) => "(" + v.X.ToString("0.##", CultureInfo.InvariantCulture) + "; " +
+                                                v.Z.ToString("0.##", CultureInfo.InvariantCulture) + ")";
 
         // ===================== основная логика =====================
 
@@ -172,6 +395,13 @@ namespace LifeFromZero.Setup
             {
                 plan.Blockers.Add("тип District750Link не найден в проекте: сначала выполните " +
                                   "install_to_unity.sh --apply (файл Assets/City/UnityIntegration/Runtime/District750Link.cs) " +
+                                  "и дождитесь компиляции Unity");
+                return Finish(plan);
+            }
+            if (LifeFromZeroSetup.FindType("PlayerHomeAnchor") == null)
+            {
+                plan.Blockers.Add("тип PlayerHomeAnchor не найден в проекте: сначала выполните " +
+                                  "install_to_unity.sh --apply (файл Assets/City/UnityIntegration/Runtime/PlayerHomeAnchor.cs) " +
                                   "и дождитесь компиляции Unity");
                 return Finish(plan);
             }
@@ -260,6 +490,9 @@ namespace LifeFromZero.Setup
 
                 // ---- 5. District750 ----
                 ApplyDistrict(plan, scene, discovery, dryRun, startInBuildSettings, anyBuildScenes);
+
+                // ---- 5a. Привязка квартиры №67 к дому (карта района v1.1) ----
+                ApplyHomeAnchor(plan, scene, dryRun);
 
                 // ---- 6. пост-проверки ДО сохранения: блокер не должен попасть на диск ----
                 PostChecks(plan, scene, discovery);
@@ -569,6 +802,53 @@ namespace LifeFromZero.Setup
             plan.Actions.Add("проверить переход из квартиры №67 в District750 и обратно (ReturnToStart) в Play Mode");
         }
 
+        /// <summary>
+        /// Привязка квартиры №67 в сцене района: проверка дома по плану и компонент PlayerHomeAnchor.
+        /// Имя сцены квартиры не угадывается (ApartmentSceneName пусто → переход остаётся выключенным).
+        /// </summary>
+        private static void ApplyHomeAnchor(IntegrationPlan plan, Scene startScene, bool dryRun)
+        {
+            if (!VerifyHomePlan(plan))
+                return;
+
+            if (plan.DistrictSceneCreated)
+            {
+                plan.Findings.Add("PlayerHomeAnchor добавлен в новую сцену района " + DistrictScenePath);
+            }
+            else
+            {
+                CityBootstrap bootstrap = FindFirst<CityBootstrap>(startScene);
+                if (bootstrap == null)
+                {
+                    plan.Actions.Add("добавить привязку квартиры №67 в сцену района: Tools → Life From Zero → " +
+                                     "Bind apartment 67 in district scene (или -executeMethod …BindHomeBatch)");
+                    return;
+                }
+
+                if (FindByTypeName(startScene, "PlayerHomeAnchor") != null)
+                {
+                    plan.Findings.Add("PlayerHomeAnchor уже есть в сцене — не дублируется");
+                }
+                else
+                {
+                    plan.Changes.Add("в сцену района добавлен PlayerHomeAnchor (точки player.home.door / player.home.exit по данным плана)");
+                    if (dryRun) return;
+                    Component anchor = LifeFromZeroSetup.TryAddComponentByTypeName(bootstrap.gameObject, "PlayerHomeAnchor");
+                    if (anchor == null)
+                    {
+                        plan.Blockers.Add("тип PlayerHomeAnchor не найден: повторите install_to_unity.sh --apply");
+                        return;
+                    }
+                    if (!string.IsNullOrWhiteSpace(ApartmentSceneName))
+                        LifeFromZeroSetup.SetStringField(anchor, "apartmentSceneName", ApartmentSceneName);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(ApartmentSceneName))
+                plan.Actions.Add("задать имя сцены квартиры: PlayerHomeAnchor → Apartment Scene Name, " +
+                                 "или повторить интеграцию с -lfzApartmentScene <имя сцены без .unity>");
+        }
+
         private static void CreateDistrictScene()
         {
             LifeFromZeroSetup.EnsureFolder(LifeFromZeroSetup.SceneFolder);
@@ -578,7 +858,11 @@ namespace LifeFromZero.Setup
             SceneManager.SetActiveScene(scene);
             try
             {
-                LifeFromZeroSetup.CreateCityRoot();
+                GameObject city = LifeFromZeroSetup.CreateCityRoot();
+                // Привязка квартиры №67: точки player.home.door / player.home.exit ставятся по данным
+                // плана при генерации, имя сцены квартиры задаёт Codex (инструмент его не угадывает).
+                if (LifeFromZeroSetup.TryAddComponentByTypeName(city, "PlayerHomeAnchor") == null)
+                    Debug.LogWarning(LogTag + " тип PlayerHomeAnchor не найден: привязка квартиры №67 в сцену района не добавлена.");
                 LifeFromZeroSetup.CreateOverviewCamera();
                 LifeFromZeroSetup.CreateDirectionalLight();
                 EditorSceneManager.MarkSceneDirty(scene);
