@@ -6,7 +6,8 @@
         "LifeFromZero.UI.Core",
         "LifeFromZero.City.Quarter",
         "UnityEngine.TestRunner",
-        "UnityEditor.TestRunner"
+        "UnityEditor.TestRunner",
+        "LifeFromZero.Jobs.Delivery"
     ],
     "includePlatforms": [
         "Editor"
