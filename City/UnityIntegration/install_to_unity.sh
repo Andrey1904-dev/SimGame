@@ -95,10 +95,12 @@ City/UnityAdapter|Assets/City/UnityAdapter
 City/Tests|Assets/City/Tests
 City/PauseMenu|Assets/City/PauseMenu
 City/PauseInputSystem|Assets/City/PauseInputSystem
-City/PauseTests|Assets/City/PauseTests"
+City/PauseTests|Assets/City/PauseTests
+City/UnityIntegration/Editor|Assets/City/UnityIntegration/Editor
+City/UnityIntegration/Runtime|Assets/City/UnityIntegration/Runtime"
 
-# "файл в репозитории|файл в Assets/ проекта"
-FILE_MAP="City/UnityIntegration/Editor/LifeFromZeroSetup.cs|Assets/City/UnityIntegration/Editor/LifeFromZeroSetup.cs"
+# "файл в репозитории|файл в Assets/ проекта" (пусто — все файлы идут каталогами)
+FILE_MAP=""
 
 # ---------- 1. исходники ----------
 step "1. Проверка исходных модулей репозитория"

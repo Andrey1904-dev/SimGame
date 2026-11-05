@@ -1,10 +1,15 @@
-// Life From Zero — City/UnityIntegration/Editor/LifeFromZeroSetup.cs (ТЗ #038)
+// Life From Zero — City/UnityIntegration/Editor/LifeFromZeroSetup.cs (ТЗ #038, дополнено ТЗ #039)
 // Namespace: LifeFromZero.Setup
 //
-// Unity Editor-инструмент: создаёт тестовую сцену District750 + объект меню паузы
+// Unity Editor-инструмент: создаёт ТЕСТОВУЮ сцену District750 + объект меню паузы
 // в СУЩЕСТВУЮЩЕМ проекте LifeFromZero (Unity 6000.3.27f1, URP 17.3.0).
 //
-// Пункт меню:  Tools → Life From Zero → Setup District750 & Pause
+// Пункты меню:
+//   Tools → Life From Zero → Setup District750 & Pause        (тестовая сцена)
+//   Tools → Life From Zero → Report input candidates          (кандидаты для пула управления)
+//   Tools → Life From Zero → Detect start scene                (ТЗ #039, LifeFromZeroDiscovery)
+//   Tools → Life From Zero → Integrate Into Game               (ТЗ #039, LifeFromZeroGameIntegration)
+//
 // Из командной строки (batchmode):
 //   Unity -batchmode -quit -projectPath "<проект>" \
 //         -executeMethod LifeFromZero.Setup.LifeFromZeroSetup.SetupBatch
@@ -14,19 +19,12 @@
 //     перезаписывается: если файл существует, инструмент останавливается;
 //   * CityTest.unity, Apartment67 и другие сцены не открываются и не меняются:
 //     новая сцена создаётся аддитивно и закрывается после сохранения;
-//   * повторный запуск не создаёт дубликатов (второй запуск просто блокируется
-//     существующей сценой);
-//   * EventSystem создаётся только если его нет в новой сцене; Canvas меню паузы
-//     создаёт сам PauseView в Awake, поэтому второй Canvas в сцене не появляется;
-//   * фиктивный контроллер персонажа не создаётся — реальные компоненты
-//     назначаются в Inspector (см. City/CODEX_EXECUTE.md, шаг 7).
+//   * повторный запуск не создаёт дубликатов (второй запуск блокируется существующей сценой);
+//   * EventSystem создаётся только если его нет; Canvas меню паузы создаёт сам PauseView;
+//   * фиктивный контроллер персонажа не создаётся.
 //
-// ВНИМАНИЕ: этот файл не компилировался в Unity в среде репозитория (Unity нет).
-// Используются только публичные API, существующие в Unity 6000.3 / URP 17.3:
-// CityBootstrap.Seed / LayoutId / GenerateOnStart / AddColliders,
-// QuarterUnityAdapter.Seed / BuildOnStart / AddColliders,
-// PauseController.Configure(...), StandalonePauseIntegration, PauseView (создаётся
-// контроллером), UnityEngine.EventSystems.EventSystem.
+// ВНИМАНИЕ: в среде репозитория Unity нет, поэтому файл не компилировался в Unity.
+// Используются только публичные API Unity 6000.3 / URP 17.3.
 
 using System;
 using System.Collections.Generic;
@@ -47,9 +45,9 @@ namespace LifeFromZero.Setup
         public const int Seed = 1904;
         public const string LayoutId = "district750";
 
-        private const string LogTag = "[LFZ-SETUP]";
+        internal const string LogTag = "[LFZ-SETUP]";
 
-        [MenuItem("Tools/Life From Zero/Setup District750 && Pause", false, 0)]
+        [MenuItem("Tools/Life From Zero/Setup District750 && Pause", false, 1)]
         public static void SetupFromMenu()
         {
             Run(false);
@@ -82,7 +80,12 @@ namespace LifeFromZero.Setup
 
             try
             {
-                BuildScene(scene);
+                CreateCityRoot();
+                CreateOverviewCamera();
+                CreateDirectionalLight();
+                CreatePauseRoot(true);
+                EnsureEventSystemInActiveScene();
+
                 EditorSceneManager.MarkSceneDirty(scene);
                 if (!EditorSceneManager.SaveScene(scene, ScenePath))
                 {
@@ -107,9 +110,11 @@ namespace LifeFromZero.Setup
             Debug.Log(LogTag + "  3) для реальных данных добавьте наследника PauseDataSource и назначьте в Pause → Data Source.");
         }
 
-        private static void BuildScene(Scene scene)
+        // ---------------- готовые части сцены (используются и интеграцией в игру) ----------------
+
+        /// <summary>Корень города: CityBootstrap (генерация) + QuarterUnityAdapter (примитивы).</summary>
+        internal static GameObject CreateCityRoot()
         {
-            // 1. Город: CityBootstrap (генерация) + QuarterUnityAdapter (построение примитивов).
             var city = new GameObject("City");
             var adapter = city.AddComponent<QuarterUnityAdapter>();
             adapter.Seed = Seed;
@@ -121,8 +126,12 @@ namespace LifeFromZero.Setup
             bootstrap.LayoutId = LayoutId;
             bootstrap.GenerateOnStart = true;
             bootstrap.AddColliders = true;
+            return city;
+        }
 
-            // 2. Камера обзора сверху (ортографическая, вся карта 750×750 м).
+        /// <summary>Ортографическая камера обзора сверху на всю карту 750×750 м.</summary>
+        internal static GameObject CreateOverviewCamera()
+        {
             var cameraObject = new GameObject("District Camera");
             cameraObject.transform.position = new Vector3(375f, 500f, 375f);
             cameraObject.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
@@ -137,8 +146,11 @@ namespace LifeFromZero.Setup
             TrySetTag(cameraObject, "MainCamera");
             // URP добавляет UniversalAdditionalCameraData сам; если тип доступен — добавляем явно.
             TryAddComponentByTypeName(cameraObject, "UnityEngine.Rendering.Universal.UniversalAdditionalCameraData");
+            return cameraObject;
+        }
 
-            // 3. Направленный свет.
+        internal static GameObject CreateDirectionalLight()
+        {
             var lightObject = new GameObject("Directional Light");
             lightObject.transform.position = new Vector3(375f, 120f, 375f);
             lightObject.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
@@ -147,45 +159,40 @@ namespace LifeFromZero.Setup
             light.intensity = 1f;
             light.color = new Color(1f, 0.96f, 0.9f, 1f);
             light.shadows = LightShadows.Soft;
+            return lightObject;
+        }
 
-            // 4. Меню паузы: один корневой объект. Canvas и UI создаёт PauseView в Awake.
+        /// <summary>Корневой объект меню паузы. Canvas и UI создаёт PauseView в Awake.</summary>
+        internal static GameObject CreatePauseRoot(bool enableStandaloneKeyboard)
+        {
             var pauseObject = new GameObject("Pause");
             var integration = pauseObject.AddComponent<StandalonePauseIntegration>();
             var controller = pauseObject.AddComponent<PauseController>();
             SetObjectReference(controller, "integration", integration);
 
-            // Только физические Esc и P, никаких I/M/J. Включается, если в проекте нет своего роутера.
+            // Только физические Esc и P. Выключается, если в проекте уже есть свой роутер Esc.
             var keyboard = TryAddComponentByTypeName(pauseObject, "PauseKeyboardInput");
             if (keyboard != null)
-            {
-                SetBoolField(keyboard, "useStandaloneKeyboard", true);
-            }
+                SetBoolField(keyboard, "useStandaloneKeyboard", enableStandaloneKeyboard);
             else
-            {
                 Debug.LogWarning(LogTag + " Тип PauseKeyboardInput не найден (ожидался в Assembly-CSharp). " +
                                  "Esc настраивается вручную: см. шаг 7 в City/CODEX_EXECUTE.md.");
-            }
+            return pauseObject;
+        }
 
-            // 5. EventSystem: ровно один, только если его нет.
-            if (UnityEngine.Object.FindFirstObjectByType<EventSystem>() == null)
-            {
-                var eventSystemObject = new GameObject("EventSystem");
-                eventSystemObject.AddComponent<EventSystem>();
-                if (!TryAddComponentByTypeName(eventSystemObject,
-                        "UnityEngine.InputSystem.UI.InputSystemUIInputModule"))
-                {
-                    eventSystemObject.AddComponent<StandaloneInputModule>();
-                }
-            }
-
-            Debug.Log(LogTag + " Сцена собрана: City (CityBootstrap + QuarterUnityAdapter), District Camera, " +
-                              "Directional Light, Pause (PauseController + StandalonePauseIntegration" +
-                              (keyboard != null ? " + PauseKeyboardInput" : "") + "), EventSystem.");
+        internal static GameObject EnsureEventSystemInActiveScene()
+        {
+            if (UnityEngine.Object.FindFirstObjectByType<EventSystem>() != null) return null;
+            var eventSystemObject = new GameObject("EventSystem");
+            eventSystemObject.AddComponent<EventSystem>();
+            if (!TryAddComponentByTypeName(eventSystemObject, "UnityEngine.InputSystem.UI.InputSystemUIInputModule"))
+                eventSystemObject.AddComponent<StandaloneInputModule>();
+            return eventSystemObject;
         }
 
         // ---------------- вспомогательные методы ----------------
 
-        private static void EnsureFolder(string folder)
+        internal static void EnsureFolder(string folder)
         {
             if (AssetDatabase.IsValidFolder(folder)) return;
             string parent = System.IO.Path.GetDirectoryName(folder) ?? "Assets";
@@ -195,7 +202,7 @@ namespace LifeFromZero.Setup
             AssetDatabase.CreateFolder(parent, leaf);
         }
 
-        private static void SetObjectReference(UnityEngine.Object target, string fieldName, UnityEngine.Object value)
+        internal static void SetObjectReference(UnityEngine.Object target, string fieldName, UnityEngine.Object value)
         {
             var serialized = new SerializedObject(target);
             SerializedProperty property = serialized.FindProperty(fieldName);
@@ -209,7 +216,7 @@ namespace LifeFromZero.Setup
             serialized.ApplyModifiedPropertiesWithoutUndo();
         }
 
-        private static void SetBoolField(UnityEngine.Object target, string fieldName, bool value)
+        internal static void SetBoolField(UnityEngine.Object target, string fieldName, bool value)
         {
             var serialized = new SerializedObject(target);
             SerializedProperty property = serialized.FindProperty(fieldName);
@@ -223,14 +230,78 @@ namespace LifeFromZero.Setup
             serialized.ApplyModifiedPropertiesWithoutUndo();
         }
 
-        private static Component TryAddComponentByTypeName(GameObject host, string typeName)
+        internal static bool FieldExists(UnityEngine.Object target, string fieldName)
+        {
+            return new SerializedObject(target).FindProperty(fieldName) != null;
+        }
+
+        internal static void SetStringField(UnityEngine.Object target, string fieldName, string value)
+        {
+            var serialized = new SerializedObject(target);
+            SerializedProperty property = serialized.FindProperty(fieldName);
+            if (property == null)
+            {
+                Debug.LogWarning(LogTag + " Поле '" + fieldName + "' не найдено в " + target.GetType().Name +
+                                 " — задайте значение вручную в Inspector.");
+                return;
+            }
+            property.stringValue = value ?? string.Empty;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        internal static void SetEnumField(UnityEngine.Object target, string fieldName, int enumValueIndex)
+        {
+            var serialized = new SerializedObject(target);
+            SerializedProperty property = serialized.FindProperty(fieldName);
+            if (property == null || property.propertyType != SerializedPropertyType.Enum)
+            {
+                Debug.LogWarning(LogTag + " Перечисление '" + fieldName + "' не найдено в " + target.GetType().Name +
+                                 " — задайте значение вручную в Inspector.");
+                return;
+            }
+            property.enumValueIndex = enumValueIndex;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        internal static bool TryGetBoolField(UnityEngine.Object target, string fieldName, out bool value)
+        {
+            value = false;
+            SerializedProperty property = new SerializedObject(target).FindProperty(fieldName);
+            if (property == null || property.propertyType != SerializedPropertyType.Boolean) return false;
+            value = property.boolValue;
+            return true;
+        }
+
+        internal static int ArraySizeOf(UnityEngine.Object target, string fieldName)
+        {
+            SerializedProperty property = new SerializedObject(target).FindProperty(fieldName);
+            return property != null && property.isArray ? property.arraySize : -1;
+        }
+
+        internal static void SetBehaviourArray(UnityEngine.Object target, string fieldName, Behaviour[] values)
+        {
+            var serialized = new SerializedObject(target);
+            SerializedProperty property = serialized.FindProperty(fieldName);
+            if (property == null || !property.isArray)
+            {
+                Debug.LogError(LogTag + " Массив '" + fieldName + "' не найден в " + target.GetType().Name +
+                               " — назначьте элементы вручную в Inspector.");
+                return;
+            }
+            property.arraySize = values.Length;
+            for (int i = 0; i < values.Length; i++)
+                property.GetArrayElementAtIndex(i).objectReferenceValue = values[i];
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        internal static Component TryAddComponentByTypeName(GameObject host, string typeName)
         {
             Type type = FindType(typeName);
             if (type == null || !typeof(Component).IsAssignableFrom(type)) return null;
             return host.AddComponent(type);
         }
 
-        private static Type FindType(string typeName)
+        internal static Type FindType(string typeName)
         {
             Type direct = Type.GetType(typeName + ", Assembly-CSharp") ?? Type.GetType(typeName);
             if (direct != null) return direct;
@@ -253,15 +324,27 @@ namespace LifeFromZero.Setup
             return null;
         }
 
-        private static void TrySetTag(GameObject target, string tag)
+        internal static void TrySetTag(GameObject target, string tag)
         {
             try { target.tag = tag; }
             catch (Exception) { Debug.LogWarning(LogTag + " Тег '" + tag + "' недоступен; камера останется без тега."); }
         }
 
+        internal static string PathOf(Transform transform)
+        {
+            var parts = new List<string>();
+            Transform current = transform;
+            while (current != null)
+            {
+                parts.Insert(0, current.name);
+                current = current.parent;
+            }
+            return string.Join("/", parts.ToArray());
+        }
+
         // ---------------- диагностика для шага 7 ----------------
 
-        [MenuItem("Tools/Life From Zero/Report input candidates", false, 20)]
+        [MenuItem("Tools/Life From Zero/Report input candidates", false, 30)]
         public static void ReportInputCandidates()
         {
             Scene active = SceneManager.GetActiveScene();
@@ -278,17 +361,15 @@ namespace LifeFromZero.Setup
                 foreach (var behaviour in root.GetComponentsInChildren<MonoBehaviour>(true))
                 {
                     if (behaviour == null) continue;
+                    if (!LifeFromZeroGameIntegration.IsProjectScript(behaviour.GetType())) continue;
                     string name = behaviour.GetType().Name.ToLowerInvariant();
                     bool candidate = false;
                     foreach (string hint in hints)
                         if (name.Contains(hint)) { candidate = true; break; }
 
                     if (candidate)
-                    {
-                        string path = PathOf(behaviour.transform);
-                        found.Add("  " + path + "  →  " + behaviour.GetType().FullName +
+                        found.Add("  " + PathOf(behaviour.transform) + "  →  " + behaviour.GetType().FullName +
                                   (behaviour.enabled ? "" : "  (disabled)"));
-                    }
                 }
             }
 
@@ -303,18 +384,6 @@ namespace LifeFromZero.Setup
                               found.Count + "), сцена '" + active.name + "':\n" + string.Join("\n", found.ToArray()));
             Debug.Log(LogTag + " Назначьте компоненты, которые управляют движением и камерой. Не назначайте " +
                                "PauseController/PauseView/StandalonePauseIntegration/PauseKeyboardInput — они отвергаются.");
-        }
-
-        private static string PathOf(Transform transform)
-        {
-            var parts = new List<string>();
-            Transform current = transform;
-            while (current != null)
-            {
-                parts.Insert(0, current.name);
-                current = current.parent;
-            }
-            return string.Join("/", parts.ToArray());
         }
     }
 }

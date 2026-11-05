@@ -123,6 +123,7 @@ else
     LOG2="$REPORT_DIR/stage2-project-structure.log"
     : >"$LOG2"
     missing=0
+    total=0
     for rel in \
         "Assets/City/Quarter/City.Quarter.asmdef" \
         "Assets/City/Quarter/QuarterGenerator.cs" \
@@ -139,7 +140,12 @@ else
         "Assets/City/PauseInputSystem/PauseKeyboardInput.cs" \
         "Assets/City/PauseTests/LifeFromZero.City.Pause.Tests.asmdef" \
         "Assets/City/PauseTests/PauseTests.cs" \
-        "Assets/City/UnityIntegration/Editor/LifeFromZeroSetup.cs" ; do
+        "Assets/City/UnityIntegration/Editor/LifeFromZeroSetup.cs" \
+        "Assets/City/UnityIntegration/Editor/LifeFromZeroDiscovery.cs" \
+        "Assets/City/UnityIntegration/Editor/LifeFromZeroGameIntegration.cs" \
+        "Assets/City/UnityIntegration/Editor/LifeFromZeroIntegrateWindow.cs" \
+        "Assets/City/UnityIntegration/Runtime/District750Link.cs" ; do
+        total=$((total + 1))
         if [ -f "$UNITY_PROJECT/$rel" ]; then
             printf 'OK   %s\n' "$rel" >>"$LOG2"
         else
@@ -159,7 +165,7 @@ else
 $(find "$UNITY_PROJECT/Assets/City" -name '*.cs' 2>/dev/null)
 EOF
     if [ "$missing" -eq 0 ]; then
-        record "PASS" 2 "Структура Unity-проекта" "все 16 файлов на месте; .cs без .meta: $meta_missing (Unity создаст при импорте)"
+        record "PASS" 2 "Структура Unity-проекта" "все $total файлов на месте; .cs без .meta: $meta_missing (Unity создаст при импорте)"
     else
         record "FAIL" 2 "Структура Unity-проекта" "отсутствует файлов: $missing (см. $(basename "$LOG2"))"
     fi
@@ -251,11 +257,36 @@ section "Этап 5. PlayMode-тесты меню паузы"
 run_unity_tests "PlayMode" 5 "PlayMode-тесты меню паузы"
 
 # =====================================================================
-section "Этап 6. Критические ошибки Unity Console"
-LOG6="$REPORT_DIR/stage6-console-scan.log"
-: >"$LOG6"
+section "Этап 6. Обнаружение стартовой сцены (ТЗ #039)"
+if [ "$RUN_TESTS" != "yes" ]; then
+    record "NOT RUN" 6 "Обнаружение стартовой сцены" "отключено флагом --no-tests"
+else
+    reason="$(unity_blocked_reason)"
+    if [ -n "$reason" ]; then
+        record "NOT RUN" 6 "Обнаружение стартовой сцены" "$reason"
+    else
+        LOG6D="$REPORT_DIR/stage6-detect.log"
+        if "$UNITY_BIN" -batchmode -quit -projectPath "$UNITY_PROJECT" \
+            -executeMethod LifeFromZero.Setup.LifeFromZeroDiscovery.DetectBatch \
+            -logFile "$LOG6D" >/dev/null 2>&1; then
+            if grep -q "RESULT: OK report=" "$LOG6D" 2>/dev/null; then
+                chosen="$(grep -o "Стартовая сцена: .*" "$LOG6D" 2>/dev/null | head -n 1)"
+                record "PASS" 6 "Обнаружение стартовой сцены" "${chosen:-см. stage6-detect.log}"
+            else
+                record "FAIL" 6 "Обнаружение стартовой сцены" "нет строки RESULT (см. stage6-detect.log)"
+            fi
+        else
+            record "FAIL" 6 "Обнаружение стартовой сцены" "Unity завершился с ошибкой (см. stage6-detect.log)"
+        fi
+    fi
+fi
+
+# =====================================================================
+section "Этап 7. Критические ошибки Unity Console"
+LOG7="$REPORT_DIR/stage7-console-scan.log"
+: >"$LOG7"
 scan_targets=""
-for f in "$REPORT_DIR"/stage4-*.log "$REPORT_DIR"/stage5-*.log; do
+for f in "$REPORT_DIR"/stage4-*.log "$REPORT_DIR"/stage5-*.log "$REPORT_DIR"/stage6-detect.log; do
     [ -f "$f" ] && scan_targets="$scan_targets$f
 "
 done
@@ -263,27 +294,27 @@ done
 "
 
 if [ -z "$scan_targets" ]; then
-    record "NOT RUN" 6 "Критические ошибки Unity Console" "нет логов Unity (этапы 4–5 не запускались, --log не передан)"
+    record "NOT RUN" 7 "Критические ошибки Unity Console" "нет логов Unity (этапы 4–6 не запускались, --log не передан)"
 else
     found=0
     while IFS= read -r f; do
         [ -n "$f" ] || continue
-        printf '=== %s\n' "$f" >>"$LOG6"
-        if grep -nE 'error CS[0-9]{4}|NullReferenceException|MissingReferenceException|Assembly has reference to non-existent assembly|Scripts have compiler errors' "$f" >>"$LOG6" 2>/dev/null; then
+        printf '=== %s\n' "$f" >>"$LOG7"
+        if grep -nE 'error CS[0-9]{4}|NullReferenceException|MissingReferenceException|Assembly has reference to non-existent assembly|Scripts have compiler errors' "$f" >>"$LOG7" 2>/dev/null; then
             found=1
         fi
     done <<EOF
 $scan_targets
 EOF
     if [ "$found" -eq 0 ]; then
-        record "PASS" 6 "Критические ошибки Unity Console" "совпадений нет ($(basename "$LOG6"))"
+        record "PASS" 7 "Критические ошибки Unity Console" "совпадений нет ($(basename "$LOG7"))"
     else
-        record "FAIL" 6 "Критические ошибки Unity Console" "найдены совпадения, см. $(basename "$LOG6")"
+        record "FAIL" 7 "Критические ошибки Unity Console" "найдены совпадения, см. $(basename "$LOG7")"
     fi
 fi
 
 # =====================================================================
-section "Этап 7. Сохранение результатов"
+section "Этап 8. Сохранение результатов"
 REPORT_MD="$REPORT_DIR/report.md"
 {
     printf '# Life From Zero — отчёт проверок (%s)\n\n' "$STAMP"
@@ -302,9 +333,9 @@ REPORT_MD="$REPORT_DIR/report.md"
 } >"$REPORT_MD" 2>/dev/null
 
 if [ -f "$REPORT_MD" ]; then
-    record "PASS" 7 "Сохранение результатов" "$REPORT_MD"
+    record "PASS" 8 "Сохранение результатов" "$REPORT_MD"
 else
-    record "FAIL" 7 "Сохранение результатов" "не удалось записать $REPORT_MD"
+    record "FAIL" 8 "Сохранение результатов" "не удалось записать $REPORT_MD"
 fi
 
 # =====================================================================
