@@ -115,9 +115,22 @@ namespace LifeFromZero.City.Quarter
         public const float DefaultInteractionRadius = 1.5f;
 
         public DeliveryPointInfo(string id, string buildingId, int entranceNumber, Vec3 position)
+            : this(id, buildingId, entranceNumber, position, "residential")
+        {
+        }
+
+        /// <summary>
+        /// Точка с типом (ТЗ №031): residential | private | pickup | логистика и типы коммерции
+        /// (например, mall, grocery, bank). Модуль Delivery тип не читает — только данные.
+        /// </summary>
+        public DeliveryPointInfo(string id, string buildingId, int entranceNumber, Vec3 position, string kind)
         {
             Id = id; BuildingId = buildingId; EntranceNumber = entranceNumber; Position = position;
+            Kind = kind ?? "residential";
         }
+
+        /// <summary>Тип точки доставки (см. конструктор с kind).</summary>
+        public string Kind { get; }
 
         public string Id { get; }
         public string BuildingId { get; }
@@ -514,13 +527,48 @@ namespace LifeFromZero.City.Quarter
                            BasementInfo basement,
                            IReadOnlyList<DeliveryPointInfo> deliveryPoints,
                            IReadOnlyList<RealEstateProperty> properties)
+            : this(seed, size, objects, roads, nodes, buildings, courtyards, pickupPoint,
+                   playerHome, shop, basement, deliveryPoints, properties,
+                   QuarterLayoutIds.Quarter250, null)
+        {
+        }
+
+        /// <summary>
+        /// Полный конструктор с идентификатором раскладки и точками карты района (ТЗ №031).
+        /// layoutId: quarter250 (квартал) | district750 (карта района).
+        /// </summary>
+        public QuarterPlan(int seed, float size,
+                           IReadOnlyList<PlacedObject> objects,
+                           IReadOnlyList<RoadSegment> roads,
+                           IReadOnlyList<RoadNode> nodes,
+                           IReadOnlyList<BuildingInfo> buildings,
+                           IReadOnlyList<CourtyardInfo> courtyards,
+                           PickupPointInfo pickupPoint,
+                           PlayerHomeInfo playerHome,
+                           GroceryShopInfo shop,
+                           BasementInfo basement,
+                           IReadOnlyList<DeliveryPointInfo> deliveryPoints,
+                           IReadOnlyList<RealEstateProperty> properties,
+                           string layoutId,
+                           IReadOnlyList<DistrictPointInfo> districtPoints)
         {
             Seed = seed; Size = size; Objects = objects; Roads = roads; Nodes = nodes;
             Buildings = buildings; Courtyards = courtyards; PickupPoint = pickupPoint;
             PlayerHome = playerHome; Shop = shop; Basement = basement;
             DeliveryPoints = deliveryPoints ?? new DeliveryPointInfo[0];
             Properties = properties ?? new RealEstateProperty[0];
+            LayoutId = layoutId ?? QuarterLayoutIds.Quarter250;
+            DistrictPoints = districtPoints ?? new DistrictPointInfo[0];
         }
+
+        /// <summary>Идентификатор раскладки: quarter250 или district750 (см. QuarterLayoutIds).</summary>
+        public string LayoutId { get; }
+
+        /// <summary>
+        /// Точки коммерции и АЗС карты района: id, тип, вход, точка взаимодействия.
+        /// Для квартала 250 м пусто (там точки — PickupPoint/Shop и объекты).
+        /// </summary>
+        public IReadOnlyList<DistrictPointInfo> DistrictPoints { get; }
 
         public int Seed { get; }
         /// <summary>Размер квартала в метрах (квадрат Size × Size, координаты 0..Size).</summary>

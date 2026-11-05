@@ -148,7 +148,9 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             }
 
             go.name = obj.TypeId + "_" + obj.Id;
-            if (obj.TypeId == QuarterObjectTypes.PickupSign || obj.TypeId == QuarterObjectTypes.ShopSign)
+            if (obj.TypeId == DistrictObjectTypes.Sign)
+                AddSignText(go, obj.Param("text", ""));
+            else if (obj.TypeId == QuarterObjectTypes.PickupSign || obj.TypeId == QuarterObjectTypes.ShopSign)
                 AddSignText(go, obj.Param("text",
                     obj.TypeId == QuarterObjectTypes.ShopSign ? GroceryShopInfo.SignText : PickupPointInfo.SignText));
             // План: позиция — центр следа на земле; объём — Size. Ставим центр по высоте.
@@ -161,8 +163,9 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
 
             if (obj.TypeId == QuarterObjectTypes.Tree && !isPrefab)
                 AddTreeCanopy(go);
-            if (obj.TypeId == QuarterObjectTypes.Building && !isPrefab)
-                BuildBuildingDetails(obj, root);
+            if ((obj.TypeId == QuarterObjectTypes.Building || obj.TypeId == DistrictObjectTypes.Commerce ||
+                 obj.TypeId == DistrictObjectTypes.IndustryBuilding) && !isPrefab)
+                BuildBuildingDetails(obj, root); // окна/панели/швы — те же меши, что у жилых домов; коллайдеров нет
             if (obj.TypeId != QuarterObjectTypes.BasementLamp)
                 go.isStatic = true; // статичная геометрия: Unity сможет батчить; материалы и меши примитивов общие
 
@@ -282,6 +285,16 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             // коллайдеров персонаж проваливался бы сквозь покрытие (аудит №026).
             typeId == QuarterObjectTypes.Road || typeId == QuarterObjectTypes.Driveway ||
             typeId == QuarterObjectTypes.Intersection || typeId == QuarterObjectTypes.Sidewalk ||
+            // Районная карта: коммерция, завод и труба — твёрдые; острова, колонки, киоск и стойки АЗС тоже непроходимы.
+            // Навес без коллайдера.
+            typeId == DistrictObjectTypes.Commerce || typeId == DistrictObjectTypes.IndustryBuilding ||
+            typeId == DistrictObjectTypes.IndustryChimney ||
+            // Кольцо и площадка погрузки — ровная земля (плоский бокс): проходимы, коллайдер нужен,
+            // т.к. общей плоскости земли в адаптере нет (как у дорог и газонов).
+            typeId == DistrictObjectTypes.Roundabout || typeId == DistrictObjectTypes.IndustryLoading ||
+            typeId == DistrictObjectTypes.GasIsland ||
+            typeId == DistrictObjectTypes.GasPump || typeId == DistrictObjectTypes.GasKiosk ||
+            typeId == DistrictObjectTypes.GasPost ||
             // Открытая земля квартала: газоны, дорожки, парковки и площадки —
             // плоские тонкие боксы, по ним персонаж ходит между дорогами
             // (аудит ТЗ №027). Разметка/места поверх них коллайдеров не получают.
@@ -651,6 +664,8 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 case QuarterObjectTypes.DeliveryDropoff:
                 case QuarterObjectTypes.PlayerHomeExit:
                 case QuarterObjectTypes.BasementPoint:
+                case DistrictObjectTypes.Roundabout: // круглый островок кольца
+                case DistrictObjectTypes.IndustryChimney: // дымовая труба
                     primitive = PrimitiveType.Cylinder;
                     break;
                 case QuarterObjectTypes.Bush:
@@ -667,6 +682,13 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             if (renderer != null) renderer.sharedMaterial = MaterialForObject(obj);
             // CreatePrimitive уже даёт коллайдер; примитивам дорог/разметки он не нужен.
             var existing = go.GetComponent<Collider>();
+            // Кольцо: цилиндр несёт CapsuleCollider; при масштабе 16×0.12×16 капсула становится столбом.
+            // Убираем его сразу и даём плоский BoxCollider (добавляется ниже, т.к. коллайдера уже нет).
+            if (existing != null && obj.TypeId == DistrictObjectTypes.Roundabout)
+            {
+                UnityEngine.Object.DestroyImmediate(existing);
+                existing = null;
+            }
             if (existing != null && !NeedsCollider(obj.TypeId))
                 Destroy(existing);
             return go;
@@ -679,7 +701,8 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             // facadeColor, и раньше ветка glass была недостижима (аудит ТЗ №026).
             if (obj.TypeId == QuarterObjectTypes.Building && obj.Param("style") == "glass")
                 return MaterialFor("detail.glass"); // стеклянный фасад элитной высотки целиком
-            if (obj.TypeId == QuarterObjectTypes.Building)
+            if (obj.TypeId == QuarterObjectTypes.Building || obj.TypeId == DistrictObjectTypes.Commerce ||
+                obj.TypeId == DistrictObjectTypes.IndustryBuilding)
             {
                 string hex = obj.Param("facadeColor");
                 if (!string.IsNullOrEmpty(hex) && ColorUtility.TryParseHtmlString(hex, out Color facade))
@@ -820,6 +843,19 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 case QuarterObjectTypes.CenterLine:
                 case QuarterObjectTypes.StopLine:
                 case QuarterObjectTypes.ParkingStall: color = new Color(0.92f, 0.92f, 0.9f); break;
+                // Районная карта (ТЗ №031): цвета — из существующей палитры, без новых ассетов.
+                case DistrictObjectTypes.Commerce: color = new Color(0.82f, 0.8f, 0.76f); break; // штукатурка коммерции
+                case DistrictObjectTypes.Sign: color = new Color(0.12f, 0.2f, 0.36f); break;     // вывеска
+                case DistrictObjectTypes.Door: color = new Color(0.35f, 0.3f, 0.26f); break;     // входная дверь
+                case DistrictObjectTypes.Roundabout: color = new Color(0.3f, 0.45f, 0.3f); break; // газон кольца
+                case DistrictObjectTypes.GasCanopy: color = new Color(0.85f, 0.25f, 0.2f); break; // навес АЗС
+                case DistrictObjectTypes.GasPost: color = new Color(0.7f, 0.7f, 0.72f); break;
+                case DistrictObjectTypes.GasIsland: color = new Color(0.75f, 0.75f, 0.72f); break;
+                case DistrictObjectTypes.GasPump: color = new Color(0.2f, 0.3f, 0.5f); break;
+                case DistrictObjectTypes.GasKiosk: color = new Color(0.9f, 0.9f, 0.88f); break;
+                case DistrictObjectTypes.IndustryBuilding: color = new Color(0.55f, 0.56f, 0.55f); break; // металл/бетон
+                case DistrictObjectTypes.IndustryChimney: color = new Color(0.5f, 0.3f, 0.25f); break;
+                case DistrictObjectTypes.IndustryLoading: color = new Color(0.45f, 0.45f, 0.45f); break;
                 default: color = Color.magenta; break; // неизвестный тип виден сразу
             }
 
