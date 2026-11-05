@@ -18,10 +18,13 @@ namespace LifeFromZero.City.Pause
         [SerializeField] private Behaviour[] playerInputBehaviours;
         [SerializeField] private GameObject[] competingModalRoots;
         [SerializeField] private Binding[] bindings;
+        private static bool IsPauseComponent(Behaviour item) =>
+            item is PauseController || item is PauseView || item is PauseIntegration ||
+            item is PauseDataSource || item.GetType().Name == "PauseKeyboardInput";
         public override bool CanOpenPause()
         {
             if (playerInputBehaviours == null || playerInputBehaviours.Length == 0) return false;
-            foreach (var item in playerInputBehaviours) if (item == null) return false;
+            foreach (var item in playerInputBehaviours) if (item == null || IsPauseComponent(item)) return false;
             if (competingModalRoots != null)
                 foreach (var modal in competingModalRoots) if (modal != null && modal.activeInHierarchy) return false;
             return true;
@@ -37,8 +40,17 @@ namespace LifeFromZero.City.Pause
             private bool[] enabled;
             public BehaviourLock(Behaviour[] source)
             {
-                items = (Behaviour[])source.Clone(); enabled = new bool[items.Length];
-                for (int i = 0; i < items.Length; i++) { enabled[i] = items[i].enabled; items[i].enabled = false; }
+                var unique = new System.Collections.Generic.List<Behaviour>(source.Length);
+                for (int i = 0; i < source.Length; i++)
+                {
+                    var item = source[i];
+                    if (item != null && !IsPauseComponent(item) && !unique.Contains(item))
+                        unique.Add(item);
+                }
+                items = unique.ToArray();
+                enabled = new bool[items.Length];
+                for (int i = 0; i < items.Length; i++) enabled[i] = items[i].enabled;
+                for (int i = 0; i < items.Length; i++) items[i].enabled = false;
             }
             public void Dispose()
             {

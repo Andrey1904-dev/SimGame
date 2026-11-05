@@ -13,12 +13,30 @@ namespace LifeFromZero.City.Pause
     }
 
     // Null values mean unknown, not zero. Percent values are in the 0..100 range.
+    // Sources storing Hunger or Stress are converted to Satiety (100 - Hunger) and Mood (100 - Stress).
     [Serializable] public sealed class PauseSnapshot
     {
         public string Day, Time, Location, LocationDetail;
         public PauseGoal[] Goals;
-        public float? Health, Hunger, Energy, Mood;
+        public float? Health, Satiety, Hunger, Energy, Mood, Stress;
         public decimal? Money, Debt, DailyIncome;
+
+        public float? ResolveSatiety()
+        {
+            if (IsFinite(Satiety)) return Mathf.Clamp(Satiety.Value, 0f, 100f);
+            if (IsFinite(Hunger)) return 100f - Mathf.Clamp(Hunger.Value, 0f, 100f);
+            return null;
+        }
+
+        public float? ResolveMood()
+        {
+            if (IsFinite(Mood)) return Mathf.Clamp(Mood.Value, 0f, 100f);
+            if (IsFinite(Stress)) return 100f - Mathf.Clamp(Stress.Value, 0f, 100f);
+            return null;
+        }
+
+        private static bool IsFinite(float? value) =>
+            value.HasValue && !float.IsNaN(value.Value) && !float.IsInfinity(value.Value);
     }
 
     // Implement in the existing application's integration layer. The event is optional;

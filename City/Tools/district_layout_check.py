@@ -98,12 +98,19 @@ def residential(bid, arch_id, cx, cz, rot, length, face, is_home=False):
         px = cx + ax + nx * (depth / 2.0 + 0.4)
         pz = cz + az + nz * (depth / 2.0 + 0.4)
         entr.append((px, pz))
+        entrance_pts.append((bid + '.entrance%d' % (e + 1), (px, pz)))
         obj('entrance', px, 0, pz, rot, 3, 3, 1, buildingId=bid, entranceNumber=e + 1)
         dx, dz = px + nx * 1.0, pz + nz * 1.0
         did = 'drop-%s-%d' % (bid, e + 1)
         deliveries.append((did, bid, (dx, dz), 'private' if private else 'residential'))
         obj('delivery.dropoff', dx, 0, dz, 0, 0.7, 0.05, 0.7, pointId=did, buildingId=bid)
-        entrance_pts.append((bid, (dx, dz)))
+        entrance_pts.append((did, (dx, dz)))
+    if is_home:
+        door_x, door_z = entr[0]
+        exit_x, exit_z = door_x + nx * 2.0, door_z + nz * 2.0
+        obj('player.home.door', door_x, 0, door_z, rot, 1.2, 2.2, 0.2, buildingId=bid, specialId='player.home')
+        obj('player.home.exit', exit_x, 0, exit_z, rot, 0.8, 0.05, 0.8, buildingId=bid, specialId='player.home')
+        obj('player.home', cx, 0, cz, rot, 1.0, 0.05, 1.0, buildingId=bid, specialId='player.home', apartment=67)
     buildings.append(dict(id=bid, arch=arch_id, floors=a['floors'], rect=rect, center=(cx, cz),
                           rot=rot, length=length, depth=depth, height=height, home=is_home,
                           private=private, entrances=entr))
@@ -127,13 +134,14 @@ def commerce(cid, ctype, name, cx, cz, length, depth, height, face, color, n_ent
             ex, ez = cx + off, cz + nz * (depth / 2.0 + 0.3)
         ix, iz = ex + nx * 1.2, ez + nz * 1.2
         eps.append((ex, ez))
+        entrance_pts.append((cid + '.entrance%d' % (k + 1), (ex, ez)))
         obj('district.door', ex, 0, ez, rot, 1.4, 2.3, 0.15)
         did = 'drop-%s-%d' % (cid, k + 1)
         deliveries.append((did, cid, (ix, iz), ctype))
         obj('delivery.dropoff', ix, 0, iz, 0, 0.7, 0.05, 0.7, pointId=did, buildingId=cid)
-        entrance_pts.append((cid, (ix, iz)))
+        entrance_pts.append((did, (ix, iz)))
     sw = min(length * 0.6, 8.0) if nx == 0 else min(depth * 0.6, 8.0)
-    obj('district.sign', cx + nx * (half + 0.15), 2.2, cz + nz * (half + 0.15), rot, sw, 0.8, 0.18, text=name)
+    obj('district.sign', cx + nx * (half + 0.15), 2.75, cz + nz * (half + 0.15), rot, sw, 0.8, 0.18, text=name)
     interaction = (eps[0][0] + nx * 1.2, eps[0][1] + nz * 1.2)
     points.append(dict(id=cid, type=ctype, name=name, center=(cx, cz), rect=rect,
                        entrances=eps, interaction=interaction))
@@ -156,8 +164,11 @@ def gas_station(gid, cx, cz, street_x):
             solid(gid + '.pump', rect_c(ix, pz, 1.0, 0.6))
     obj('gas.kiosk', cx - 22, 0, cz - 10, 0, 6, 3, 4)
     solid(gid + '.kiosk', rect_c(cx - 22, cz - 10, 6, 4))
+    gas_entr = [(cx + 30, cz - 8), (cx + 30, cz + 8)]
+    for idx_e, ge in enumerate(gas_entr):
+        entrance_pts.append((gid + '.entrance%d' % (idx_e + 1), ge))
     points.append(dict(id=gid, type='gas.station', name='АЗС', center=(cx, cz), rect=pad,
-                       entrances=[(cx + 30, cz - 8), (cx + 30, cz + 8)], interaction=None))
+                       entrances=gas_entr, interaction=None))
 
 
 def lot(lid, rect, stalls):
@@ -385,13 +396,20 @@ def build_district():
     solid('pvz-01', rect_c(85, 316, 12, 8))
     obj('pickup.building', 85, 0, 316, 0, 12, 3.2, 8,
         buildingId='pvz-01', signText='ПУНКТ ВЫДАЧИ ЗАКАЗОВ')
+    obj('pickup.roof', 85, 3.2, 316, 0, 12.6, 0.25, 8.6, buildingId='pvz-01')
+    obj('pickup.door', 85, 0, 311.92, 180, 1.2, 2.2, 0.15, buildingId='pvz-01')
+    for ox in (-4.4, -2.6, 2.6, 4.4):
+        obj('pickup.window', 85 + ox, 0.9, 311.94, 180, 1.6, 1.2, 0.1, buildingId='pvz-01')
+    obj('pickup.sign', 85, 2.2, 311.85, 180, 6.5, 0.8, 0.18, buildingId='pvz-01', text='ПУНКТ ВЫДАЧИ ЗАКАЗОВ')
     obj('pickup.plaza', 85, 0, 310, 0, 14, 0.07, 4)
     zone('pvz-01.plaza', rect_c(85, 310, 14, 4))
     obj('pickup.point', 85, 0, 310.4, 0, 0.8, 0.05, 0.8, purpose='delivery.pickup')
+    obj('delivery.dropoff', 85, 0, 310.4, 0, 0.7, 0.05, 0.7, pointId='drop-pvz-01', buildingId='pvz-01')
     points.append(dict(id='pvz-01', type='pickup', name='ПУНКТ ВЫДАЧИ ЗАКАЗОВ', center=pvz_center,
                        rect=rect_c(85, 316, 12, 8), entrances=[(85, 311.7)], interaction=(85, 310.4)))
     deliveries.append(('drop-pvz-01', 'pvz-01', (85, 310.4), 'pickup'))
-    entrance_pts.append(('pvz-01', (85, 310.4)))
+    entrance_pts.append(('pvz-01.entrance1', (85, 311.7)))
+    entrance_pts.append(('drop-pvz-01', (85, 310.4)))
     # ---------- Западный блок: АЗС-4 под ломбардом ----------
     gas_station('gas-04', 85, 395, 150)
     gas_station('gas-02', 85, 680, 150)
@@ -409,19 +427,24 @@ def build_district():
     solid('chimney-1', rect_c(532, 712, 2.4, 2.4))
     solid('chimney-2', rect_c(538, 712, 2.4, 2.4))
     obj('district.door', 470, 0, 670, 0, 6.0, 4.5, 0.3, kind='gate')   # ворота завода (не solid)
+    obj('delivery.dropoff', 478, 0, 666, 0, 0.7, 0.05, 0.7, pointId='drop-ind-factory-gate', buildingId='ind-factory')
     points.append(dict(id='ind-factory', type='factory', name='ЗАВОД', center=(500, 690),
                        rect=rect_c(500, 690, 100, 40), entrances=[(470, 669)], interaction=(478, 666)))
     deliveries.append(('drop-ind-factory-gate', 'ind-factory', (478, 666), 'logistics'))
-    entrance_pts.append(('ind-factory', (478, 666)))
+    entrance_pts.append(('ind-factory.entrance1', (470, 669)))
+    entrance_pts.append(('drop-ind-factory-gate', (478, 666)))
     solid('warehouse-prod', rect_c(640, 690, 80, 30))
     obj('industry.building', 640, 0, 690, 0, 80, 8.0, 30, facadeColor='#7D8B6A', name='ПРОИЗВОДСТВО')
-    lawn('industry.loading', rect_c(640, 662, 70, 8))  # площадка погрузки: ground, высота 0.06 (C# — flat box)
+    zone('industry.loading', rect_c(640, 662, 70, 8))  # площадка погрузки: ground, высота 0.06 (C# — flat box)
+    obj('industry.loading', 640, 0, 662, 0, 70, 0.06, 8)
     obj('district.door', 640, 0, 675, 0, 6.0, 4.5, 0.3, kind='gate')   # ворота производства (не solid)
+    obj('delivery.dropoff', 652, 0, 662, 0, 0.7, 0.05, 0.7, pointId='drop-ind-loading-dock', buildingId='ind-warehouse')
     points.append(dict(id='ind-warehouse', type='industry.warehouse', name='ПРОИЗВОДСТВО/СКЛАД',
                        center=(640, 690), rect=rect_c(640, 690, 80, 30), entrances=[(640, 674)],
                        interaction=(652, 662)))
     deliveries.append(('drop-ind-loading-dock', 'ind-warehouse', (652, 662), 'logistics'))
-    entrance_pts.append(('ind-warehouse', (652, 662)))
+    entrance_pts.append(('ind-warehouse.entrance1', (640, 674)))
+    entrance_pts.append(('drop-ind-loading-dock', (652, 662)))
     # ---------- Лесопарк ----------
     lawn('forest-park', (26, 26, 144, 194))
     for (tx, tz) in [(x, z) for x in range(40, 140, 12) for z in range(40, 194, 14)][:40]:
@@ -563,7 +586,7 @@ def check_all():
     for r in blocked:
         for ix in range(max(0, int(r[0])), min(N, int(r[2]) + 1)):
             for iz in range(max(0, int(r[1])), min(N, int(r[3]) + 1)):
-                if r[0] <= ix + 0.5 <= r[2] and r[1] <= iz + 0.5 <= r[3]:
+                if r[0] + 0.01 < ix + 0.5 < r[2] - 0.01 and r[1] + 0.01 < iz + 0.5 < r[3] - 0.01:
                     grid[ix][iz] = False
     seen = [[False] * N for _ in range(N)]
     dq = deque()
@@ -584,7 +607,8 @@ def check_all():
     unreachable = []
     for owner, (px, pz) in entrance_pts:
         ix, iz = int(px), int(pz)  # строго клетка точки: стена вокруг входа = недостижимо
-        ok = 0 <= ix < N and 0 <= iz < N and seen[ix][iz]
+        inside_blocker = any(r[0] + 0.01 < px < r[2] - 0.01 and r[1] + 0.01 < pz < r[3] - 0.01 for r in blocked)
+        ok = 0 <= ix < N and 0 <= iz < N and seen[ix][iz] and not inside_blocker
         if not ok:
             unreachable.append((owner, px, pz))
     for u in unreachable:
