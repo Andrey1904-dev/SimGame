@@ -1,6 +1,6 @@
-# ТЗ #036 — интеграция District750 и Pause Menu (после финального аудита)
+# ТЗ #036–#037 — интеграция District750 и Pause Menu (после финального аудита и доработки по референсу)
 
-PR #10 (District750) и PR #11 (Pause Menu) уже слиты в `main` (`f4b6b8c`). Исправления финального аудита (ТЗ #036) находятся в ветке `arena/2fe575ce-simgame`. В среде репозитория нет Unity 6000.3.27f1 и .NET SDK, поэтому компиляция C#, прогон NUnit/PlayMode, визуальная сверка с референсами и замер FPS выполняются локально в `/Users/homepc/Projects/LifeFromZero`.
+PR #10 (District750) и PR #11 (Pause Menu) уже слиты в `main` (`f4b6b8c`). Исправления финального аудита (ТЗ #036) и доработка Pause Menu по утверждённому референсу `Pause Menu.PNG` (ТЗ #037) находятся в ветке `arena/2fe575ce-simgame` (PR #12). В среде репозитория нет Unity 6000.3.27f1 и .NET SDK, поэтому компиляция C#, прогон NUnit/PlayMode, визуальная сверка с референсами и замер FPS выполняются локально в `/Users/homepc/Projects/LifeFromZero`.
 
 ## Получение актуального кода
 
@@ -38,11 +38,11 @@ git pull --ff-only origin arena/2fe575ce-simgame
 2. Подключить реализацию `PauseIntegration` в поле `Integration` (без неё `Open()` безопасно возвращает `false`). Контроллер сам сохраняет `Time.timeScale` и состояние `Cursor` **до** вызова `AcquireGameplayLock()` и гарантированно восстанавливает их в `finally` при `Close()`.
 3. При отсутствии централизованного менеджера окон добавить `StandalonePauseIntegration` на объект `Pause`, назначить его в `Integration`, указать в `Player Input Behaviours` все компоненты управления персонажем/камерой и в `Competing Modal Roots` — корни конкурирующих окон. Адаптер дедуплицирует повторные ссылки в массиве и отклоняет компоненты самой паузы (`PauseController`, `PauseView`, `PauseKeyboardInput`), чтобы персонаж никогда не оставался без управления после закрытия меню.
 4. Направить `Esc` в `PauseController.Instance.HandleEscape()`, а физическую клавишу `P` — в `HandlePhoneKey()` (только при открытой паузе). При отсутствии внешнего роутера ввода добавить `PauseKeyboardInput` на объект `Pause` и включить `Use Standalone Keyboard`.
-5. Унаследовать `PauseDataSource`, заполнить `PauseSnapshot` реальными данными (неизвестные поля — `null`/пусто, проценты `0..100`, до 3 целей) и назначить в `Data Source`.
-6. Реализовать `IsAvailable` и `Execute` для доступных `PauseAction`. Кнопки меню имеют `Navigation.Mode.None` и не остаются постоянно выделенными после клика.
+5. Унаследовать `PauseDataSource`, заполнить `PauseSnapshot` реальными данными (неизвестные поля — `null`/пусто, проценты `0..100`, до 3 целей) и назначить в `Data Source`. Если источник данных хранит `Hunger` или `Stress` (`0..100`), `PauseSnapshot.ResolveSatiety()` и `ResolveMood()` автоматически преобразуют их к «Сытости» (`100 - Hunger`) и «Настроению» (`100 - Stress`); можно также передавать `Satiety` и `Mood` напрямую. В блоке «Финансы» отображаются `Money` (`Деньги:`, белый), `Debt` (`Долг:`, красный) и `DailyIncome` (`Доход за день:`, зелёный с `+` при `> 0`, красный с `-` при `< 0`, либо `Нет данных` при `null`). Все иконки меню генерируются процедурными `Sprite` без зависимости от отсутствующих Unicode-глифов.
+6. Реализовать `IsAvailable` и `Execute` для доступных `PauseAction`. Все 7 кнопок левой панели имеют одинаковое тёмное оформление и `Navigation.Mode.None` (не остаются постоянно выделенными после клика).
 7. При смене scene-local сервисов вызывать `PauseController.Instance.Configure(newIntegration, newDataSource)`.
 
 ## Проверка в Unity
 
-1. Unity Test Runner → PlayMode → `LifeFromZero.City.Pause.Tests` (6 тестов в `PauseTests`, включая проверку дубликатов `Behaviour` в `StandalonePauseIntegration` и отсутствие залипания выделения кнопок).
-2. В Play Mode проверить: `Esc` (открытие/закрытие), кнопку «Продолжить игру», остановку и восстановление `Time.timeScale`, видимость и блокировку курсора, блокировку и возврат управления персонажем, клавишу `P` для телефона, отсутствие второго `Canvas`/`EventSystem`, работу при `1920×1080` и `2560×1440`, а также визуально сверить с локальными референсами карты v1.1 и макета Pause Menu и замерить FPS на MacBook Air M4.
+1. Unity Test Runner → PlayMode → `LifeFromZero.City.Pause.Tests` (8 тестов в `PauseTests`, включая проверку структуры, карточек, названий, цветов и конвертации данных по `Pause Menu.PNG`).
+2. В Play Mode проверить: `Esc` (открытие/закрытие), кнопку «Продолжить игру», остановку и восстановление `Time.timeScale`, видимость и блокировку курсора, блокировку и возврат управления персонажем, клавишу `P` для телефона, отсутствие второго `Canvas`/`EventSystem`, работу при `1920×1080`, `2560×1440` и `1600×900`, а также визуально сверить с локальными референсами карты v1.1 и `Pause Menu.PNG` и замерить FPS на MacBook Air M4.
