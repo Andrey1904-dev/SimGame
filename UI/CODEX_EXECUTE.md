@@ -97,18 +97,51 @@ public interface IPhoneDataSource
 `Jobs.Delivery`), а не дублировать их состояние. Правило: UI не хранит деньги,
 заказы и статусы — он их отображает.
 
-### Шаг 5. Заказы и доставка (`IDeliveryUiBridge`)
+### Шаг 5. Заказы и доставка (`Jobs.Delivery`)
+
+Мост **уже написан**: `DeliveryServiceBridge` реализует `IPhoneDataSource` и
+`IDeliveryUiBridge` поверх настоящего `IDeliveryService` (`accept`, `pickup`,
+`complete`, `cancel`, `abandon`), координаты точки доставки берёт из
+`QuarterPlan`, отказы объясняет игроку по коду (`DeliveryPhoneCommands.Describe`).
+
+Что нужно сделать в проекте — четыре подключения, все через инспектор:
+
+| Поле `DeliveryServiceBridge` | Что положить | Зачем |
+|---|---|---|
+| `Delivery Service Source` | наследник `DeliveryServiceHost` (см. ниже) | сервис — обычный класс, сцене нужен компонент |
+| `Clock Adapter` | реализация `IGameClockAdapter` | сроки заказа |
+| `Payout Adapter` | реализация `IPayoutAdapter` | выплата за заказ |
+| `Location Provider` | реализация `ILocationProvider` | «я в точке получения/доставки» |
 
 ```csharp
-public interface IDeliveryUiBridge
+public sealed class GameDeliveryHost : DeliveryServiceHost
 {
-    bool TryRun(string verb, string orderId, out string message);
+    [SerializeField] private MonoBehaviour serviceOwner;   // ваш объект с DeliveryService
+    protected override IDeliveryService CreateService() => serviceOwner as IDeliveryService;
 }
 ```
 
-`verb` приходит из телефона (`accept`, `cancel`, `complete` и т. п.). Если верб
-неизвестен — вернуть `false` и текст причины; UI покажет его игроку, а не
-«Ничего не произошло».
+Если что-то из четырёх не назначено, кнопки заказа вернут понятную причину
+(«Кошелёк не подключён»), а не ложный успех. Телефон при отсутствии моста
+показывает «Система доставки не подключена» — это честное состояние.
+
+В реальном `DeliveryService` уже есть правила (один активный заказ, выдача только
+в точке получения, выплата один раз). UI их **не дублирует**.
+
+### Шаг 5б. Кнопки меню паузы и настройки
+
+`UiMenuActions` — единственное место, где кнопки «Сохранить», «Загрузить»,
+«Главное меню» получают исполнителя:
+
+```csharp
+public sealed class GameSaveAction : MonoBehaviour, IUiGameAction
+{
+    public bool Run(out string message) { /* сохранить игру */ }
+}
+```
+
+Пока исполнителя нет, кнопка неактивна, а игрок не получает ложного «Игра
+сохранена». Громкость и полный экран UI применяет сам (`UiSettings`).
 
 ### Шаг 6. Район
 
