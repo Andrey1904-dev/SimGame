@@ -6,6 +6,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using LifeFromZero.City.Quarter;
 using LifeFromZero.UI.Core;
 
 namespace LifeFromZero.UI.Tests
@@ -24,6 +26,9 @@ namespace LifeFromZero.UI.Tests
             AddPhoneTests(suite);
             AddFormatTests(suite);
             AddPauseContractTests(suite);
+            AddPauseLayoutTests(suite);
+            AddQuarterPlanAdapterTests(suite);
+            AddSnapTests(suite);
             return suite;
         }
 
@@ -582,7 +587,8 @@ namespace LifeFromZero.UI.Tests
                 navigation.NavigateTo(WaypointService.OrderIdPrefix + "3", new MapPoint(0f, 0f));
 
                 int before = navigation.RebuildCount;
-                navigation.Tick(new MapPoint(0f, 50f), 0.016f);
+                // Точка НА маршруте: (10,0) лежит на первом отрезке (0,0)→(100,0).
+                navigation.Tick(new MapPoint(10f, 0f), 0.016f);
                 UiAssert.Equal(before, navigation.RebuildCount, "на маршруте перестроения нет");
 
                 navigation.Tick(new MapPoint(500f, 300f), 0.016f);
@@ -933,6 +939,298 @@ namespace LifeFromZero.UI.Tests
                 sm.Apply(UiIntent.Back);
                 sm.Apply(UiIntent.Resume);
                 UiAssert.Equal(UiScreen.Gameplay, sm.Screen, "кнопка «Продолжить» работает");
+            });
+        }
+
+        // ---------------------------------------------------------------- измеренная раскладка паузы
+
+        private static void AddPauseLayoutTests(UiTestSuite suite)
+        {
+            suite.Add("Раскладка: измеренные прямоугольники не выходят за кадр 1672×941", () =>
+            {
+                LayoutRect[] rects =
+                {
+                    PauseLayout.LeftPanel, PauseLayout.RightPanel, PauseLayout.Logo, PauseLayout.Title,
+                    PauseLayout.HeaderDate, PauseLayout.HeaderAddress, PauseLayout.Goals,
+                    PauseLayout.Status, PauseLayout.Finance, PauseLayout.QuickLinks, PauseLayout.BarTrack,
+                };
+                foreach (LayoutRect rect in rects)
+                {
+                    UiAssert.True(rect.Left >= 0f && rect.Top >= 0f, "левый верхний угол в кадре: " + rect);
+                    UiAssert.True(rect.Right <= PauseLayout.FrameWidth + 0.01f, "правый край в кадре: " + rect);
+                    UiAssert.True(rect.Bottom <= PauseLayout.FrameHeight + 0.01f, "нижний край в кадре: " + rect);
+                    UiAssert.True(rect.Width > 0f && rect.Height > 0f, "размер положителен: " + rect);
+                }
+            });
+
+            suite.Add("Раскладка: валидатор не находит ни одной проблемы", () =>
+            {
+                System.Collections.Generic.IReadOnlyList<string> issues = PauseLayout.Validate();
+                if (issues.Count > 0)
+                    throw new InvalidOperationException("раскладка паузы сломана: " + string.Join("; ", issues));
+                UiAssert.Equal(0, issues.Count, "проблем нет");
+            });
+
+            suite.Add("Раскладка: панели не пересекаются и имеют зазор", () =>
+            {
+                UiAssert.False(PauseLayout.LeftPanel.Overlaps(PauseLayout.RightPanel), "панели не пересекаются");
+                UiAssert.True(PauseLayout.LeftPanel.Right < PauseLayout.RightPanel.Left, "между панелями зазор");
+            });
+
+            suite.Add("Раскладка: семь кнопок меню идут ровным шагом внутри панели", () =>
+            {
+                UiAssert.Equal(7, PauseLayout.ButtonCount, "кнопок ровно семь, как в референсе");
+                for (int i = 0; i < PauseLayout.ButtonCount; i++)
+                {
+                    LayoutRect button = PauseLayout.Button(i);
+                    UiAssert.True(PauseLayout.LeftPanel.Contains(button), "кнопка " + i + " внутри панели");
+                    if (i > 0)
+                    {
+                        UiAssert.Near(PauseLayout.ButtonPitch, button.Top - PauseLayout.Button(i - 1).Top, 0.01f,
+                            "шаг кнопок постоянный");
+                    }
+                }
+                UiAssert.Near(67f, PauseLayout.Button(0).Height, 0.01f, "высота кнопки по замеру");
+            });
+
+            suite.Add("Раскладка: кнопка не наезжает на заголовок и не выходит за панель снизу", () =>
+            {
+                UiAssert.True(PauseLayout.Button(0).Top >= PauseLayout.Title.Bottom - 13f,
+                    "первая кнопка ниже заголовка «Пауза»");
+                UiAssert.True(PauseLayout.Button(PauseLayout.ButtonCount - 1).Bottom < PauseLayout.LeftPanel.Bottom,
+                    "последняя кнопка внутри панели");
+            });
+
+            suite.Add("Раскладка: кнопки не меньше 44 px при 1080p", () =>
+            {
+                double height = PauseLayout.Units(PauseLayout.Button(0).Height);
+                UiAssert.True(height >= 44.0, "высота кнопки в единицах uGUI: " + height.ToString("0.#", CultureInfo.InvariantCulture));
+                double link = PauseLayout.Units(PauseLayout.QuickLinkButtons[0].Height);
+                UiAssert.True(link >= 44.0, "быстрые ссылки тоже не меньше 44 px: " + link.ToString("0.#", CultureInfo.InvariantCulture));
+            });
+
+            suite.Add("Раскладка: подписи кнопок влезают по ширине", () =>
+            {
+                for (int i = 0; i < PauseLayout.ButtonCount; i++)
+                {
+                    string caption = PauseLayout.MenuCaptions[i];
+                    UiAssert.True(PauseLayout.ButtonCaptionFits(caption),
+                        "подпись «" + caption + "» шире кнопки");
+                    UiAssert.True(PauseLayout.EstimateTextWidth(caption, PauseLayout.FontButton)
+                                 < PauseLayout.ButtonWidth - 20f, "есть поля по краям: «" + caption + "»");
+                }
+            });
+
+            suite.Add("Раскладка: полосы статуса ровные, внутри блока и не лезут на проценты", () =>
+            {
+                for (int i = 0; i < PauseLayout.StatusRowTops.Length; i++)
+                {
+                    LayoutRect bar = PauseLayout.Bar(i);
+                    UiAssert.True(PauseLayout.Status.Contains(bar), "полоса " + i + " внутри блока «Статус»");
+                    UiAssert.True(bar.Right < PauseLayout.StatusPercentRight, "полоса " + i + " не залезает на проценты");
+                    if (i > 0) UiAssert.Near(41f, bar.Top - PauseLayout.Bar(i - 1).Top, 0.1f, "шаг строк статуса");
+                }
+            });
+
+            suite.Add("Раскладка: якоря лежат в [0..1] и переводятся обратимо", () =>
+            {
+                foreach (LayoutRect rect in new[]
+                {
+                    PauseLayout.LeftPanel, PauseLayout.RightPanel, PauseLayout.Goals,
+                    PauseLayout.Status, PauseLayout.Finance, PauseLayout.QuickLinks,
+                })
+                {
+                    AnchorRect anchors = PauseLayout.ToAnchors(rect);
+                    UiAssert.True(anchors.IsInsideScreen, "якоря внутри экрана: " + anchors);
+                    double width = anchors.Width * PauseLayout.FrameWidth;
+                    double height = anchors.Height * PauseLayout.FrameHeight;
+                    UiAssert.Near(rect.Width, (float)width, 0.01f, "ширина восстанавливается по якорям");
+                    UiAssert.Near(rect.Height, (float)height, 0.01f, "высота восстанавливается по якорям");
+                }
+            });
+
+            suite.Add("Раскладка: дочерние якоря считаются от родителя, а не от кадра", () =>
+            {
+                AnchorRect nested = PauseLayout.ToAnchors(PauseLayout.Button(0), PauseLayout.LeftPanel);
+                UiAssert.True(nested.XMin > 0f && nested.XMax < 1f, "кнопка внутри левой панели по X: " + nested);
+                UiAssert.True(nested.YMin > 0f && nested.YMax < 1f, "кнопка внутри левой панели по Y: " + nested);
+                UiAssert.Near((float)((PauseLayout.Button(0).Left - PauseLayout.LeftPanel.Left) / PauseLayout.LeftPanel.Width),
+                    nested.XMin, 0.0001f, "левый край кнопки относительно панели");
+            });
+
+            suite.Add("Раскладка: минимальный кегль читаем при 1080p", () =>
+            {
+                double smallest = PauseLayout.Units(Math.Min(PauseLayout.FontSmall, PauseLayout.FontBody));
+                UiAssert.True(smallest >= PauseLayout.MinimumReadableFont,
+                    "мельче " + PauseLayout.MinimumReadableFont + " px текста нет: " + smallest.ToString("0.#", CultureInfo.InvariantCulture));
+                UiAssert.True(PauseLayout.FontSize(PauseLayout.FontButton) > PauseLayout.FontSize(PauseLayout.FontSmall),
+                    "иерархия кеглей сохраняется");
+            });
+
+            suite.Add("Раскладка: сетка быстрых ссылок 2×2 не пересекается", () =>
+            {
+                LayoutRect[] links = PauseLayout.QuickLinkButtons;
+                UiAssert.Equal(4, links.Length, "четыре быстрые ссылки");
+                for (int i = 0; i < links.Length; i++)
+                {
+                    UiAssert.True(PauseLayout.QuickLinks.Contains(links[i]), "ссылка " + i + " внутри блока");
+                    for (int j = i + 1; j < links.Length; j++)
+                    {
+                        UiAssert.False(links[i].Overlaps(links[j]), "ссылки " + i + " и " + j + " не пересекаются");
+                    }
+                }
+                UiAssert.Near(links[0].Top, links[1].Top, 0.01f, "первый ряд на одной линии");
+                UiAssert.Near(links[2].Top, links[3].Top, 0.01f, "второй ряд на одной линии");
+                UiAssert.True(links[2].Top > links[0].Bottom, "второй ряд ниже первого");
+            });
+
+            suite.Add("Раскладка: ухудшение геометрии ловится валидатором", () =>
+            {
+                // Симулируем «поехавшую» вёрстку: кнопка за пределами панели.
+                var broken = new LayoutRect(PauseLayout.ButtonLeft, 900f, PauseLayout.ButtonWidth, PauseLayout.ButtonHeight);
+                UiAssert.False(PauseLayout.LeftPanel.Contains(broken), "сломанная кнопка не должна содержаться в панели");
+                // И проверяем, что Contains/Overlaps действительно работают как ожидается.
+                var inside = new LayoutRect(100f, 300f, 100f, 50f);
+                UiAssert.True(PauseLayout.LeftPanel.Contains(inside), "нормальный прямоугольник внутри панели");
+                UiAssert.False(inside.Overlaps(new LayoutRect(500f, 300f, 50f, 50f)), "далёкие прямоугольники не пересекаются");
+                UiAssert.True(inside.Overlaps(new LayoutRect(150f, 320f, 50f, 50f)), "пересекающиеся прямоугольники видны");
+            });
+        }
+
+        private static void AddSnapTests(UiTestSuite suite)
+        {
+            suite.Add("Привязка: точка в 55 м от перекрёстка цепляется к дороге, а не теряется", () =>
+            {
+                Dictionary<string, int> names;
+                RoadGraphData graph = BuildGridGraph(out names);
+                var planner = new RoutePlanner();
+
+                // (0,55) — рядом с дорогой x=0, но до узлов 55 м и 45 м (дальше допуска узла 45 м).
+                RouteResult result = planner.Build(graph, new MapPoint(0f, 55f),
+                    new MapPoint(600f, 600f), "test", "цель");
+                UiAssert.True(result.Success, "маршрут построен: " + result.Message);
+                UiAssert.Near(0f, result.Path.SnapStart.X, 0.01f, "старт привязан к дороге по X");
+                UiAssert.Near(55f, result.Path.SnapStart.Z, 0.01f, "старт остался на своей высоте, а не на узле");
+            });
+
+            suite.Add("Привязка: проекция на отрезок работает для диагонального ребра", () =>
+            {
+                MapPoint projection = RoadGraphData.ProjectOnSegment(new MapPoint(0f, 50f),
+                    new MapPoint(0f, 0f), new MapPoint(100f, 0f));
+                UiAssert.Near(0f, projection.X, 0.001f, "проекция по X");
+                UiAssert.Near(0f, projection.Z, 0.001f, "проекция по Z на оси");
+
+                MapPoint diagonal = RoadGraphData.ProjectOnSegment(new MapPoint(0f, 100f),
+                    new MapPoint(0f, 0f), new MapPoint(100f, 100f));
+                UiAssert.Near(50f, diagonal.X, 0.001f, "середина диагонали X");
+                UiAssert.Near(50f, diagonal.Z, 0.001f, "середина диагонали Z");
+            });
+
+            suite.Add("Привязка: далёкая от дорог точка честно получает отказ", () =>
+            {
+                Dictionary<string, int> names;
+                RoadGraphData graph = BuildGridGraph(out names);
+                var planner = new RoutePlanner();
+                RouteResult result = planner.Build(graph, new MapPoint(5000f, 5000f),
+                    new MapPoint(0f, 0f), "test", "цель");
+                UiAssert.False(result.Success, "маршрут не строится из точки вне района");
+                UiAssert.Equal((int)RouteFailure.StartNotConnected, (int)result.Failure, "причина — старт вне сети");
+            });
+
+            suite.Add("Привязка: все точки доставки District750 достижимы пешком от дороги", () =>
+            {
+                QuarterPlan plan = DistrictMapGenerator.Generate(1904);
+                QuarterPlanMapData data = QuarterPlanAdapter.Build(plan);
+                var planner = new RoutePlanner();
+                int unreachable = 0;
+                for (int i = 0; i < plan.DeliveryPoints.Count; i++)
+                {
+                    // Реальный сценарий: игрок у дома, цель — точка доставки (подъезд во дворе).
+                    MapPoint point = new MapPoint(plan.DeliveryPoints[i].Position.X,
+                        plan.DeliveryPoints[i].Position.Z);
+                    RouteResult result = planner.Build(data.Graph, new MapPoint(85f, 680f), point, "x", "y");
+                    if (!result.Success) unreachable++;
+                }
+                UiAssert.Equal(0, unreachable, "непривязанных точек доставки быть не должно");
+            });
+        }
+
+        // ---------------------------------------------------------------- связь с районом
+
+        private static void AddQuarterPlanAdapterTests(UiTestSuite suite)
+        {
+            suite.Add("Район: пустой план не роняет карту и не даёт граф", () =>
+            {
+                QuarterPlanMapData data = QuarterPlanAdapter.Build(null);
+                UiAssert.Equal(0, data.Roads.Count, "дорог нет");
+                UiAssert.Equal(0, data.Points.Count, "точек нет");
+                UiAssert.False(data.HasGraph, "маршрутизировать не по чему");
+                UiAssert.False(data.HasRoads, "рисовать нечего");
+            });
+
+            suite.Add("Район: District750 разбирается в дороги, точки и связный граф", () =>
+            {
+                QuarterPlan plan = DistrictMapGenerator.Generate(1904);
+                QuarterPlanMapData data = QuarterPlanAdapter.Build(plan);
+                UiAssert.True(data.Roads.Count > 20, "дороги извлечены: " + data.Roads.Count);
+                UiAssert.True(data.Points.Count > 20, "точки извлечены: " + data.Points.Count);
+                UiAssert.Equal(750f, data.Size, "сторона района");
+                UiAssert.True(data.HasGraph, "граф построен");
+                UiAssert.True(data.Graph.NodeCount >= plan.Nodes.Count, "все узлы плана попали в граф");
+                UiAssert.True(data.Graph.IsConnected, "граф связный — маршрут существует");
+            });
+
+            suite.Add("Район: маршрут между двумя реальными точками доставки строится", () =>
+            {
+                QuarterPlan plan = DistrictMapGenerator.Generate(1904);
+                QuarterPlanMapData data = QuarterPlanAdapter.Build(plan);
+                UiAssert.True(plan.DeliveryPoints.Count >= 2, "в плане есть точки доставки");
+
+                // Игрок выходит из дома (дверь bld-n3), цель — точка доставки в другом квартале.
+                var home = new MapPoint(205f, 636f);
+                MapPoint to = new MapPoint(plan.DeliveryPoints[plan.DeliveryPoints.Count - 1].Position.X,
+                    plan.DeliveryPoints[plan.DeliveryPoints.Count - 1].Position.Z);
+
+                var planner = new RoutePlanner();
+                RouteResult result = planner.Build(data.Graph, home, to, "test", "точка");
+                UiAssert.True(result.Success, "маршрут построен: " + result.Message);
+                UiAssert.True(result.Path.TotalDistance > 0f, "длина маршрута положительна");
+                UiAssert.True(result.Path.TotalDistance < 3000f, "длина в пределах района: " + result.Path.TotalDistance);
+            });
+
+            suite.Add("Район: координаты точки доставки ищутся по Id, а не угадываются", () =>
+            {
+                QuarterPlan plan = DistrictMapGenerator.Generate(1904);
+                string id = plan.DeliveryPoints[0].Id;
+                MapPoint position;
+                UiAssert.True(QuarterPlanAdapter.TryGetDeliveryPosition(plan, id, out position), "точка найдена");
+                UiAssert.Near(plan.DeliveryPoints[0].Position.X, position.X, 0.001f, "X совпадает");
+                UiAssert.Near(plan.DeliveryPoints[0].Position.Z, position.Z, 0.001f, "Z совпадает");
+                UiAssert.False(QuarterPlanAdapter.TryGetDeliveryPosition(plan, "нет-такой-точки", out position),
+                    "несуществующий Id не превращается в (0,0)");
+                UiAssert.False(QuarterPlanAdapter.TryGetDeliveryPosition(plan, null, out position), "null не падает");
+            });
+
+            suite.Add("Район: маршрут к точке доставки проходит через NavigationService", () =>
+            {
+                QuarterPlan plan = DistrictMapGenerator.Generate(1904);
+                QuarterPlanMapData data = QuarterPlanAdapter.Build(plan);
+
+                var navigation = new NavigationService();
+                navigation.SetGraph(data.Graph);
+
+                MapPoint dropOff = new MapPoint(plan.DeliveryPoints[3].Position.X, plan.DeliveryPoints[3].Position.Z);
+                Waypoint waypoint = navigation.Waypoints.SetOrder("order-1", dropOff, "Заказ order-1");
+
+                NavigationOutcome outcome = navigation.NavigateTo(waypoint, new MapPoint(85f, 680f));
+                UiAssert.True(outcome.Ok, "маршрут построен: " + outcome.Message);
+                UiAssert.NotNull(navigation.ActiveRoute, "активный маршрут есть");
+                UiAssert.Equal("Заказ order-1", navigation.ActiveRoute.DestinationLabel, "подпись цели");
+
+                // Карта и HUD читают ОДИН маршрут: закрытие заказа снимает его и метку.
+                navigation.OnOrderClosed("order-1");
+                UiAssert.Null(navigation.ActiveRoute, "маршрут снят вместе с заказом");
+                UiAssert.Null(navigation.Waypoints.FindOrder("order-1"), "метка заказа удалена");
             });
         }
     }

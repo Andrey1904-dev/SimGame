@@ -151,6 +151,71 @@ namespace LifeFromZero.UI.Core
             return best;
         }
 
+        /// <summary>
+        /// Ближайшая точка на РЕБРЕ графа (не только на узле) с допуском.
+        /// Нужна потому, что реальные точки доставки стоят у подъездов, а узлы — на
+        /// перекрёстках: до узла 70–130 м, до ближайшего ребра — единицы метров.
+        /// Возвращает -1, если в пределах допуска дороги нет.
+        /// </summary>
+        public int FindNearestEdge(MapPoint point, float maxDistance, out MapPoint projection,
+            out float distance, IReadOnlyList<int> allowedNodes = null)
+        {
+            projection = point;
+            distance = float.PositiveInfinity;
+            int best = -1;
+            for (int e = 0; e < _edges.Count; e++)
+            {
+                RouteEdge edge = _edges[e];
+                if (allowedNodes != null &&
+                    !Contains(allowedNodes, edge.From) && !Contains(allowedNodes, edge.To))
+                {
+                    continue;
+                }
+
+                MapPoint a = _nodes[edge.From].Position;
+                MapPoint b = _nodes[edge.To].Position;
+                MapPoint projected = ProjectOnSegment(point, a, b);
+                float d = projected.DistanceTo(point);
+                if (d < distance)
+                {
+                    distance = d;
+                    projection = projected;
+                    best = e;
+                }
+            }
+
+            if (best < 0 || distance > maxDistance)
+            {
+                distance = float.PositiveInfinity;
+                projection = point;
+                return -1;
+            }
+            return best;
+        }
+
+        /// <summary>Проекция точки на отрезок (работает и для диагональных рёбер).</summary>
+        public static MapPoint ProjectOnSegment(MapPoint point, MapPoint a, MapPoint b)
+        {
+            float dx = b.X - a.X;
+            float dz = b.Z - a.Z;
+            float lengthSquared = dx * dx + dz * dz;
+            if (lengthSquared < 1e-6f) return a;
+
+            float t = ((point.X - a.X) * dx + (point.Z - a.Z) * dz) / lengthSquared;
+            if (t <= 0f) return a;
+            if (t >= 1f) return b;
+            return new MapPoint(a.X + dx * t, a.Z + dz * t);
+        }
+
+        private static bool Contains(IReadOnlyList<int> list, int value)
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] == value) return true;
+            }
+            return false;
+        }
+
         /// <summary>Компонента связности, содержащая узел (обход в ширину по рёбрам).</summary>
         public List<int> ComponentOf(int node)
         {

@@ -164,8 +164,25 @@ namespace LifeFromZero.UI.Core
         /// <summary>Максимальное расстояние «прилипания» игрока к дороге, метры.</summary>
         public float StartSnapRadius { get; set; } = 45f;
 
-        /// <summary>Максимальное расстояние «прилипания» цели к дороге, метры.</summary>
-        public float DestinationSnapRadius { get; set; } = 60f;
+        /// <summary>
+        /// Допуск привязки к РЕБРУ дороги (а не к перекрёстку), метры.
+        /// Подъезд/точка доставки стоят во дворе: до узла бывает 70–130 м,
+        /// до ближайшей дороги — единицы метров. Без этого маршрут к заказу
+        /// не строился бы у большинства адресов (видно по тесту района).
+        /// </summary>
+        public float EdgeSnapRadius { get; set; } = 45f;
+
+        /// <summary>
+        /// Максимальное расстояние «прилипания» цели к дороге, метры.
+        ///
+        /// Здесь допуск больше, чем у игрока: точка доставки — это подъезд внутри
+        /// двора, а дороги идут по периметру квартала. По замеру District750 у 17 из
+        /// 46 точек расстояние до ближайшей дороги 47–75 м, то есть при допуске 60 м
+        /// маршрут к каждому третьему заказу не строился бы вовсе. Последний участок
+        /// идёт как подход пешком (<see cref="RoutePath.EndsOnApproach"/>), поэтому
+        /// 90 м — это «дойти через двор», а не «телепорт».
+        /// </summary>
+        public float DestinationSnapRadius { get; set; } = 90f;
 
         /// <summary>Насколько точка считается достигнутой, метры.</summary>
         public float ArriveRadius { get; set; } = 2.5f;
@@ -190,13 +207,18 @@ namespace LifeFromZero.UI.Core
             if (network.Count == 0)
                 return RouteResult.Fail(RouteFailure.NoGraph, "Дорожная сеть пуста.");
 
-            int startNode = graph.FindNearestNode(start, StartSnapRadius, network);
-            if (startNode < 0)
-                return RouteResult.Fail(RouteFailure.StartNotConnected,
-                    "Нет дороги рядом с игроком — маршрут не построен.");
+            // Привязка к сети: сначала ищем ребро (любую точку дороги), затем узел.
+            int startNode;
+            int endNode;
+            MapPoint startSnap;
+            MapPoint endSnap;
+            RouteFailure snapFailure;
+            float startRadius = Math.Max(StartSnapRadius, EdgeSnapRadius);
+            if (!SnapToNetwork(graph, start, startRadius, network, out startNode, out startSnap, out snapFailure))
+                return RouteResult.Fail(snapFailure, "Нет дороги рядом с игроком — маршрут не построен.");
 
-            int endNode = graph.FindNearestNode(destination, DestinationSnapRadius, network);
-            if (endNode < 0)
+            if (!SnapToNetwork(graph, destination, DestinationSnapRadius, network, out endNode, out endSnap,
+                    out snapFailure))
                 return RouteResult.Fail(RouteFailure.DestinationNotConnected,
                     "Цель не связана с дорожной сетью.");
 
@@ -206,8 +228,8 @@ namespace LifeFromZero.UI.Core
                     "Маршрут по дорогам не найден: цель недостижима от игрока.");
 
             // Собираем точки: проекция старта на дорогу, узлы пути, проекция цели.
-            MapPoint snapStart = graph.NodePosition(startNode);
-            MapPoint snapEnd = graph.NodePosition(endNode);
+            MapPoint snapStart = startSnap;
+            MapPoint snapEnd = endSnap;
             var steps = new List<RouteStep>(nodes.Count + 2);
             float cumulative = 0f;
             MapPoint previous = snapStart;
@@ -257,6 +279,43 @@ namespace LifeFromZero.UI.Core
             var path = new RoutePath(destinationId, destinationLabel, destination, steps.ToArray(),
                 cumulative, snapStart, snapEnd, endsOnApproach);
             return RouteResult.Ok(path);
+        }
+
+        /// <summary>
+        /// Привязать точку к дорожной сети: ближайшее ребро в допуске, иначе ближайший узел.
+        /// Возвращает индекс входного узла и точку проекции на дорогу.
+        /// </summary>
+        private bool SnapToNetwork(RoadGraphData graph, MapPoint point, float radius,
+            IReadOnlyList<int> network, out int node, out MapPoint snap, out RouteFailure failure)
+        {
+            failure = RouteFailure.None;
+            node = -1;
+            snap = point;
+
+            MapPoint projection;
+            float distance;
+            int edgeIndex = graph.FindNearestEdge(point, radius, out projection, out distance, network);
+            if (edgeIndex >= 0)
+            {
+                RouteEdge edge = graph.Edges[edgeIndex];
+                int fromDistance = graph.NodePosition(edge.From).DistanceTo(projection) <=
+                                   graph.NodePosition(edge.To).DistanceTo(projection)
+                    ? edge.From
+                    : edge.To;
+                node = fromDistance;
+                snap = projection;
+                return true;
+            }
+
+            node = graph.FindNearestNode(point, radius, network);
+            if (node < 0)
+            {
+                failure = RouteFailure.StartNotConnected;
+                return false;
+            }
+
+            snap = graph.NodePosition(node);
+            return true;
         }
 
         private static bool IsFinite(MapPoint p) =>

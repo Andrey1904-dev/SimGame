@@ -31,7 +31,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
     ///   new QuarterUnityAdapter().Build(plan, parentTransform);
     /// или повесить компонент на пустой объект и задать Seed в инспекторе.
     /// </summary>
-    public sealed class QuarterUnityAdapter : MonoBehaviour
+    public sealed class QuarterUnityAdapter : MonoBehaviour, IQuarterPlanSource
     {
         [Header("Генерация")]
         [SerializeField] private int seed = 1904;
@@ -51,11 +51,21 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         public GameObject BuiltRoot => _builtRoot;
 
         /// <summary>
+        /// План последней генерации (ТЗ №042: его читает карта/HUD, чтобы рисовать
+        /// ТОТ ЖЕ район, который стоит в сцене). null, пока квартал не построен.
+        /// </summary>
+        public QuarterPlan Plan => _plan;
+
+        /// <summary>План уже сгенерирован.</summary>
+        public bool HasPlan => _plan != null;
+
+        /// <summary>
         /// Уничтожает построенный квартал и его меши деталей. Материалы кэша
         /// принадлежат адаптеру и освобождаются в OnDestroy, а не здесь.
         /// </summary>
         public void ClearBuilt()
         {
+            _plan = null;
             if (_builtRoot != null)
             {
                 Destroy(_builtRoot);
@@ -97,10 +107,14 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         // сцене — используйте два компонента-адаптера.
         private GameObject _builtRoot;
 
+        // План последней генерации: его читает UI (карта/HUD, ТЗ №042).
+        private QuarterPlan _plan;
+
         /// <summary>Создаёт дочерние объекты по плану. Возвращает корень квартала.</summary>
         public GameObject Build(QuarterPlan plan, Transform parent)
         {
             if (plan == null) throw new System.ArgumentNullException(nameof(plan));
+            _plan = plan;
 
             // Повторный Build: предыдущий квартал и его меши уничтожаются.
             ClearBuilt();
