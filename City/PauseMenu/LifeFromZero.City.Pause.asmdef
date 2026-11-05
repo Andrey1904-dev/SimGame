@@ -1,0 +1,6 @@
+{
+  "name": "LifeFromZero.City.Pause",
+  "rootNamespace": "LifeFromZero.City.Pause",
+  "references": ["Unity.ugui"],
+  "autoReferenced": true
+}

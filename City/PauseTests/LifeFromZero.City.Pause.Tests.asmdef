@@ -1,0 +1,7 @@
+{
+  "name": "LifeFromZero.City.Pause.Tests",
+  "references": ["LifeFromZero.City.Pause", "UnityEngine.TestRunner", "Unity.ugui"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "autoReferenced": false
+}
