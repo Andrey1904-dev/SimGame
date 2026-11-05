@@ -29,6 +29,7 @@ namespace LifeFromZero.UI.Tests
             AddPauseLayoutTests(suite);
             AddQuarterPlanAdapterTests(suite);
             AddSnapTests(suite);
+            AddDeliveryPhoneTests(suite);
             return suite;
         }
 
@@ -1153,6 +1154,99 @@ namespace LifeFromZero.UI.Tests
                 }
                 UiAssert.Equal(0, unreachable, "непривязанных точек доставки быть не должно");
             });
+        }
+
+        private static void AddDeliveryPhoneTests(UiTestSuite suite)
+        {
+            suite.Add("Телефон: заказы доставки раскладываются в активный и доступные", () =>
+            {
+                var orders = new[]
+                {
+                    new DeliveryPhoneOrder("a", "Куртка", "drop-1", "Северный квартал", 450,
+                        OrderStage.Accepted, new MapPoint(85f, 680f), "до 18:00"),
+                    new DeliveryPhoneOrder("b", "Пицца", "drop-2", "Южный квартал", 300,
+                        OrderStage.Available, new MapPoint(500f, 120f), "до 19:00"),
+                };
+
+                var view = new OrdersView();
+                DeliveryPhoneRows.Fill(view, orders);
+
+                UiAssert.NotNull(view.Active, "активный заказ должен быть выбран");
+                UiAssert.Equal("a", view.Active.OrderId, "активный — принятый");
+                UiAssert.Equal(1, view.Available.Count, "доступный заказ один");
+                UiAssert.Equal("b", view.Available[0].OrderId, "доступный — непринятый");
+                UiAssert.True(view.Active.HasDropOffCoordinates, "координаты переносятся как есть");
+
+                string reason;
+                UiAssert.True(view.Active.CanRoute(out reason), "по принятому заказу маршрут строится");
+            });
+
+            suite.Add("Телефон: заказ без координат не обещает маршрут", () =>
+            {
+                var orders = new[]
+                {
+                    new DeliveryPhoneOrder("c", "Посылка", "drop-3", "Двор", 200,
+                        OrderStage.PickedUp, null, ""),
+                };
+                var view = new OrdersView();
+                DeliveryPhoneRows.Fill(view, orders);
+
+                string reason;
+                UiAssert.False(view.Active.CanRoute(out reason), "без координат маршрута нет");
+                UiAssert.True(!string.IsNullOrEmpty(reason), "причина должна быть названа игроку: " + reason);
+            });
+
+            suite.Add("Телефон: пустой список заказов не превращается в пример данных", () =>
+            {
+                var view = new OrdersView();
+                DeliveryPhoneRows.Fill(view, Array.Empty<DeliveryPhoneOrder>(), "Доставка не подключена");
+
+                UiAssert.True(view.Active == null, "активного заказа быть не должно");
+                UiAssert.Equal(0, view.Available.Count, "доступных заказов нет");
+                UiAssert.Equal("Доставка не подключена", view.UnavailableReason, "причина сохраняется");
+            });
+
+            suite.Add("Телефон: действие заказа разбирается на verb и id", () =>
+            {
+                string verb, id;
+                UiAssert.True(DeliveryPhoneRows.TryParse("order.accept:ord-17", out verb, out id), "разбор заказа");
+                UiAssert.Equal("accept", verb, "verb");
+                UiAssert.Equal("ord-17", id, "id заказа");
+
+                UiAssert.False(DeliveryPhoneRows.TryParse("app.messages", out verb, out id),
+                    "не-заказное действие не должно считаться заказом");
+            });
+
+            suite.Add("Телефон: отказы доставки объясняются игроку, а не кодом", () =>
+            {
+                string wrongLocation = DeliveryPhoneCommands.Describe("WrongLocation", DeliveryPhoneCommands.PickUp);
+                UiAssert.True(wrongLocation.Contains("точке получения"), "подсказка про выдачу груза: " + wrongLocation);
+
+                string expired = DeliveryPhoneCommands.Describe("DeadlineExpired", DeliveryPhoneCommands.Complete);
+                UiAssert.True(expired.Contains("истёк"), "просроченный заказ: " + expired);
+
+                string unknown = DeliveryPhoneCommands.Describe("WeirdCode", DeliveryPhoneCommands.Accept);
+                UiAssert.True(unknown.Contains("WeirdCode"), "неизвестный код доходит до игрока: " + unknown);
+            });
+
+            suite.Add("Телефон: приложения включаются только те, что работают", () =>
+            {
+                IReadOnlyList<PhoneAppTile> without = PhoneAppCatalog.Build(false);
+                IReadOnlyList<PhoneAppTile> with = PhoneAppCatalog.Build(true);
+
+                UiAssert.Equal(without.Count, with.Count, "набор плиток одинаковый");
+                PhoneAppTile ordersOff = FindTile(without, PhoneAppIds.Orders);
+                PhoneAppTile ordersOn = FindTile(with, PhoneAppIds.Orders);
+                UiAssert.NotNull(ordersOff, "плитка заказов есть всегда");
+                UiAssert.False(ordersOff.Available, "без доставки заказы недоступны");
+                UiAssert.True(ordersOn.Available, "с доставкой заказы доступны");
+            });
+        }
+
+        private static PhoneAppTile FindTile(IReadOnlyList<PhoneAppTile> tiles, string id)
+        {
+            for (int i = 0; i < tiles.Count; i++) if (tiles[i].Id == id) return tiles[i];
+            return null;
         }
 
         // ---------------------------------------------------------------- связь с районом

@@ -243,6 +243,7 @@ namespace LifeFromZero.UI.Editor
                     // сцене есть City.Pause, — источник данных и передача действий.
                     if (root.GetComponent<UiGameBridge>() == null) root.AddComponent<UiGameBridge>();
                     if (root.GetComponent<PauseUiSnapshotSource>() == null) root.AddComponent<PauseUiSnapshotSource>();
+                    if (root.GetComponent<DeliveryServiceBridge>() == null) root.AddComponent<DeliveryServiceBridge>();
 
                     // UiBootstrap сам создаёт экраны в Awake, но если проект запускает
                     // интерфейс из кода (UiBootstrap.Ensure) — экраны всё равно нужны.
@@ -298,8 +299,8 @@ namespace LifeFromZero.UI.Editor
                 "Телефон: реализовать IPhoneDataSource (ReadPhone/TryRun) и отдать его в UiBootstrap, " +
                 "либо реализовать интерфейс на PauseUiSnapshotSource. Сейчас телефон показывает каркас.");
             result.ManualSteps.Add(
-                "Заказы: реализовать IDeliveryUiBridge (accept/cancel/complete) и назначить в " +
-                "UiBootstrap → Delivery System. В репозитории нет DeliveryService, поэтому вызывать нечего.");
+                "Заказы: написать наследника DeliveryServiceHost (CreateService() → ваш IDeliveryService) " +
+                "и повесить на объект сцены. DeliveryServiceBridge сам найдёт его и подключит телефон.");
             result.ManualSteps.Add(
                 "Если сцене нужен план района не из QuarterUnityAdapter — вызвать " +
                 "UiBootstrap.SetDistrictPlan(plan) после генерации города.");

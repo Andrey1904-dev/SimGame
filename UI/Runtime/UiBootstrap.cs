@@ -287,6 +287,7 @@ namespace LifeFromZero.UI.Runtime
         private QuarterMapGeometry _mapGeometry;
         private QuarterPlan _plan;
         private LifeFromZero.City.Pause.PauseIntegration _existingPause;
+        private DeliveryServiceBridge _deliveryBridge;
 
         private static QuarterPlan _externalPlan;
 
@@ -333,10 +334,24 @@ namespace LifeFromZero.UI.Runtime
             PhoneScreen phone = Resolve<PhoneScreen>();
             if (phone == null) return;
 
+            _deliveryBridge = Resolve<DeliveryServiceBridge>();
+            if (_deliveryBridge != null && !_deliveryBridge.Connected)
+            {
+                Report.Miss("DeliveryServiceHost — заказы: мост есть, но сервис доставки не найден");
+            }
+            else if (_deliveryBridge != null)
+            {
+                Report.Ok("система доставки (Jobs.Delivery) через DeliveryServiceBridge");
+                if (!_deliveryBridge.CommandsReady)
+                    Report.Miss("части игры для команд доставки: " + _deliveryBridge.CommandBlockReason);
+            }
+
             // Телефон получает данные через делегаты. Конкретные источники подставляет
             // интегратор проекта (см. UI/CODEX_EXECUTE.md): UI не знает про DeliveryService
             // и PhoneFacade напрямую, чтобы не появилась вторая экономика.
-            if (snapshotSource is IPhoneDataSource provider)
+            IPhoneDataSource provider = snapshotSource as IPhoneDataSource;
+            if (provider == null) provider = _deliveryBridge;
+            if (provider != null)
             {
                 phone.DataProvider = provider.ReadPhone;
                 Report.Ok("данные телефона");
@@ -377,18 +392,21 @@ namespace LifeFromZero.UI.Runtime
                 return "Приложение «" + appId + "» не подключено к игре.";
             }
 
-            if (action.StartsWith("order.", StringComparison.Ordinal))
+            string verb;
+            string orderId;
+            if (DeliveryPhoneRows.TryParse(action, out verb, out orderId))
             {
-                int separator = action.IndexOf(':');
-                string verb = separator > 0 ? action.Substring(0, separator) : action;
-                string orderId = separator > 0 ? action.Substring(separator + 1) : string.Empty;
+                IDeliveryUiBridge bridge = ResolveDeliveryBridge();
+                if (bridge == null) return "Система заказов не подключена.";
                 string outcome;
-                if (deliverySystem is IDeliveryUiBridge bridge && bridge.TryRun(verb, orderId, out outcome))
+                if (bridge.TryRun(verb, orderId, out outcome))
                     return string.IsNullOrEmpty(outcome) ? null : outcome;
-                return "Система заказов не подключена.";
+                return string.IsNullOrEmpty(outcome) ? "Действие с заказом не выполнено." : outcome;
             }
 
-            if (snapshotSource is IPhoneDataSource phoneData)
+            IPhoneDataSource phoneData = snapshotSource as IPhoneDataSource;
+            if (phoneData == null) phoneData = _deliveryBridge;
+            if (phoneData != null)
             {
                 string outcome;
                 if (phoneData.TryRun(action, out outcome)) return outcome;
@@ -397,13 +415,21 @@ namespace LifeFromZero.UI.Runtime
             return null;
         }
 
+        /// <summary>Мост к доставке: назначен в инспекторе → найден в сцене → нет.</summary>
+        private IDeliveryUiBridge ResolveDeliveryBridge()
+        {
+            if (deliverySystem is IDeliveryUiBridge assigned) return assigned;
+            return _deliveryBridge;
+        }
+
         private string OnPhoneRoute(string orderId)
         {
             if (_plan == null) return "Район не загружен — маршрут недоступен.";
             if (string.IsNullOrEmpty(orderId)) return "Заказ не выбран.";
 
-            if (!(snapshotSource is IPhoneDataSource phoneData))
-                return "Данные телефона не подключены.";
+            IPhoneDataSource phoneData = snapshotSource as IPhoneDataSource;
+            if (phoneData == null) phoneData = _deliveryBridge;
+            if (phoneData == null) return "Данные телефона не подключены.";
 
             PhoneSnapshot snapshot = phoneData.ReadPhone();
             OrderView order = FindOrder(snapshot, orderId);

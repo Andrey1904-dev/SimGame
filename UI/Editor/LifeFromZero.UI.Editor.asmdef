@@ -6,7 +6,8 @@
         "LifeFromZero.UI.Core",
         "LifeFromZero.City.Quarter",
         "LifeFromZero.City.Pause",
-        "LifeFromZero.City.Quarter.UnityAdapter"
+        "LifeFromZero.City.Quarter.UnityAdapter",
+        "LifeFromZero.Jobs.Delivery"
     ],
     "includePlatforms": [
         "Editor"

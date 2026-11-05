@@ -4,7 +4,8 @@
     "references": [
         "LifeFromZero.UI.Core",
         "LifeFromZero.City.Quarter",
-        "LifeFromZero.City.Pause"
+        "LifeFromZero.City.Pause",
+        "LifeFromZero.Jobs.Delivery"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

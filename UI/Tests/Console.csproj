@@ -19,6 +19,8 @@
     <Compile Include="../Core/**/*.cs" />
     <!-- Район нужен тестам моста QuarterPlan → карта/граф (UI/Core/QuarterPlanAdapter.cs). -->
     <Compile Include="../../City/Quarter/**/*.cs" />
+    <!-- Заказы доставки: мост телефона держится на этом модуле (чистый C#, без Unity). -->
+    <Compile Include="../../Jobs/Delivery/**/*.cs" />
     <Compile Include="**/*.cs" />
   </ItemGroup>
 

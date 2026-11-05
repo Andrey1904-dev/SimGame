@@ -21,6 +21,8 @@ files = (sorted(glob.glob('UI/Core/*.cs'))
          # City.Pause: UI использует существующую паузу проекта. Только контракты —
          # PauseView тянет uGUI, который в стабах не нужен и не покрыт.
          + ['City/PauseMenu/PauseContracts.cs']
+         # Jobs.Delivery: чистый C#-модуль, UI подключается к нему мостом телефона.
+         + sorted(glob.glob('Jobs/Delivery/*.cs'))
          + ['UI/Tools/unitystubs/UnityStubs.cs', 'UI/Tools/editorstubs/EditorStubs.cs'])
 
 ok, errs, warns, ms = compile_to_image(files)
