@@ -15,6 +15,7 @@ namespace LifeFromZero.City.Quarter.Tests
             suite.AddRange(FinalCityTests.CreateSuite());
             suite.AddRange(AuditTests.CreateSuite());
             suite.AddRange(DistrictMapTests.CreateSuite());
+            suite.AddRange(QuarterPlanSourceTests.CreateSuite());
             return suite;
         }
     }

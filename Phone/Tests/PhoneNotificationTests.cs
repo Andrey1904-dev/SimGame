@@ -226,10 +226,28 @@ namespace LifeFromZero.Phone.Tests
             var notifications = new PhoneNotificationService();
 
             MiniTestRunner.AreEqual(PhoneResultCode.InvalidArgument, notifications.Add(null).Code, "null-уведомление");
+
+            // Контракт двух уровней (аудит ТЗ №043):
+            //   PhoneNotification (модель) бросает ArgumentException на пустой ID;
+            //   PhoneNotificationService (сервис) возвращает PhoneResultCode.
+            // Прежний тест собирал модель с пустым ID внутри вызова Add — падал
+            // ArgumentException до входа в сервис. Проверяем каждый уровень там,
+            // где он действительно работает.
+            MiniTestRunner.IsTrue(
+                PhoneAppRegistryTests.Throws<ArgumentException>(
+                    () => new PhoneNotification("", "s", PhoneNotificationType.Message, "T", "X", GameMinutes.Unknown, false)),
+                "конструктор уведомления не пропускает пустой ID");
+
+            // Сервисный путь с пустыми данными: Add(id, source, ...) обязан вернуть код.
             MiniTestRunner.AreEqual(
                 PhoneResultCode.InvalidArgument,
-                notifications.Add(new PhoneNotification("", "s", PhoneNotificationType.Message, "T", "X", GameMinutes.Unknown, false)).Code,
-                "пустой ID");
+                notifications.Add("  ", "s", PhoneNotificationType.Message, "T", "X", null).Code,
+                "сервис отклоняет пустой ID кодом");
+
+            MiniTestRunner.AreEqual(
+                PhoneResultCode.InvalidArgument,
+                notifications.Add("n-blank", "  ", PhoneNotificationType.Message, "T", "X", null).Code,
+                "сервис отклоняет пустой источник кодом");
         }
 
         private static void MarkRead()

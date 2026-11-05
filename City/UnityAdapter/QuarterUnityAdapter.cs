@@ -54,10 +54,10 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         /// План последней генерации (ТЗ №042: его читает карта/HUD, чтобы рисовать
         /// ТОТ ЖЕ район, который стоит в сцене). null, пока квартал не построен.
         /// </summary>
-        public QuarterPlan Plan => _plan;
+        public QuarterPlan Plan => _planSlot.Plan;
 
         /// <summary>План уже сгенерирован.</summary>
-        public bool HasPlan => _plan != null;
+        public bool HasPlan => _planSlot.HasPlan;
 
         /// <summary>
         /// Уничтожает построенный квартал и его меши деталей. Материалы кэша
@@ -65,7 +65,9 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         /// </summary>
         public void ClearBuilt()
         {
-            _plan = null;
+            // План снесённого квартала не оставляем: карта читает его через
+            // IQuarterPlanSource и иначе нарисовала бы несуществующий город.
+            _planSlot.Clear();
             if (_builtRoot != null)
             {
                 Destroy(_builtRoot);
@@ -108,16 +110,23 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         private GameObject _builtRoot;
 
         // План последней генерации: его читает UI (карта/HUD, ТЗ №042).
-        private QuarterPlan _plan;
+        // Логика хранения — в QuarterPlanSlot (проверяется вне Unity); здесь только поле.
+        private readonly QuarterPlanSlot _planSlot = new QuarterPlanSlot();
 
         /// <summary>Создаёт дочерние объекты по плану. Возвращает корень квартала.</summary>
         public GameObject Build(QuarterPlan plan, Transform parent)
         {
             if (plan == null) throw new System.ArgumentNullException(nameof(plan));
-            _plan = plan;
 
             // Повторный Build: предыдущий квартал и его меши уничтожаются.
+            // ПОРЯДОК ВАЖЕН: ClearBuilt() сбрасывает план (он описывает снесённый
+            // квартал), поэтому новый план фиксируется ТОЛЬКО ПОСЛЕ очистки.
+            // Раньше присвоение стояло до вызова и тут же затиралось — Plan/HasPlan
+            // всегда оставались пустыми, и карта UI не получала район
+            // (регрессия ТЗ №043, тест QuarterPlanSourceTests).
             ClearBuilt();
+
+            _planSlot.BeginBuild(plan);
 
             _prefabs.Clear();
             foreach (QuarterPrefabOverride o in prefabOverrides)

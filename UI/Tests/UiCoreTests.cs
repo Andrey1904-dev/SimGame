@@ -1305,6 +1305,31 @@ namespace LifeFromZero.UI.Tests
                 UiAssert.False(QuarterPlanAdapter.TryGetDeliveryPosition(plan, null, out position), "null не падает");
             });
 
+            // РЕГРЕССИЯ ТЗ №043: сквозной путь «план района → данные карты».
+            // Дефект PR #14 был в том, что адаптер отдавал Plan == null после
+            // сборки, и карта получала пустоту. Здесь проверяется сам контракт
+            // источника плана: как только план есть, карта обязана его увидеть
+            // в полном объёме (дороги, точки, связный граф).
+            suite.Add("Район: источник плана отдаёт район карте после сборки (регрессия P0)", () =>
+            {
+                var slot = new QuarterPlanSlot();
+                UiAssert.False(slot.HasPlan, "до сборки плана нет");
+
+                QuarterPlan plan = DistrictMapGenerator.Generate(1904);
+                slot.BeginBuild(plan);
+
+                UiAssert.True(slot.HasPlan, "после сборки план доступен");
+                UiAssert.True(ReferenceEquals(plan, slot.Plan), "карта получает тот же объект плана");
+
+                QuarterPlanMapData data = QuarterPlanAdapter.Build(slot.Plan);
+                UiAssert.True(data.HasRoads, "дороги извлечены из плана источника");
+                UiAssert.True(data.HasGraph, "граф построен из плана источника");
+
+                slot.Clear();
+                UiAssert.False(slot.HasPlan, "после сноса план недоступен");
+                UiAssert.False(QuarterPlanAdapter.Build(slot.Plan).HasRoads, "карта не рисует снесённый район");
+            });
+
             suite.Add("Район: маршрут к точке доставки проходит через NavigationService", () =>
             {
                 QuarterPlan plan = DistrictMapGenerator.Generate(1904);

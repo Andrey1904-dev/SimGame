@@ -1,7 +1,9 @@
 {
     "name": "LifeFromZero.UI.Core",
     "rootNamespace": "LifeFromZero.UI.Core",
-    "references": [],
+    "references": [
+        "LifeFromZero.City.Quarter"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
