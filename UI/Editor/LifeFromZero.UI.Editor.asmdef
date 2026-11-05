@@ -1,0 +1,21 @@
+{
+    "name": "LifeFromZero.UI.Editor",
+    "rootNamespace": "LifeFromZero.UI.Editor",
+    "references": [
+        "LifeFromZero.UI",
+        "LifeFromZero.UI.Core",
+        "LifeFromZero.City.Quarter",
+        "LifeFromZero.City.Quarter.UnityAdapter"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
