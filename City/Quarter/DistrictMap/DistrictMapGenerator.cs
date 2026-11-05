@@ -400,7 +400,14 @@ namespace LifeFromZero.City.Quarter
 
             private void AddPlayground(float cx, float cz, float sx, float sz)
             {
-                Put(QuarterObjectTypes.Playground, cx, 0f, cz, 0f, sx, 1.2f, sz);
+                AddPlayground(cx, cz, sx, sz, new (string, string)[0]);
+            }
+
+            /// <summary>Площадка с параметрами (например, футбольная: sport=football).</summary>
+            private void AddPlayground(float cx, float cz, float sx, float sz,
+                                       params (string Key, string Value)[] pairs)
+            {
+                Put(QuarterObjectTypes.Playground, cx, 0f, cz, 0f, sx, 1.2f, sz, pairs);
             }
 
             // ======================= жилые дома =======================
@@ -465,14 +472,22 @@ namespace LifeFromZero.City.Quarter
 
                 if (isHome)
                 {
+                    // Квартира №67 (карта района v1.1): дом выбран юго-западным в северном квартале,
+                    // южнее футбольной площадки. Дверь — первый подъезд на фасаде normal, выход —
+                    // в 2 м наружу, во двор. Это постоянная привязка: координаты берутся из центра
+                    // дома и его глубины, вручную не дублируются.
                     Vec2 door = entrances[0];
                     Vec2 exit = door + normal * 2f;
                     _playerHome = new PlayerHomeInfo(bid, center, rot,
                         new Vec3(door.X, 0f, door.Z), new Vec3(exit.X, 0f, exit.Z));
                     Put(QuarterObjectTypes.PlayerHomeDoor, door.X, 0f, door.Z, rot, 1.2f, 2.2f, 0.2f,
-                        ("buildingId", bid), ("specialId", PlayerHomeInfo.SpecialId));
+                        ("buildingId", bid), ("specialId", PlayerHomeInfo.SpecialId),
+                        ("purpose", "player.home.door"),
+                        ("apartment", Inv(PlayerHomeInfo.ApartmentNumber)));
                     Put(QuarterObjectTypes.PlayerHomeExit, exit.X, 0f, exit.Z, rot, 0.8f, 0.05f, 0.8f,
-                        ("buildingId", bid), ("specialId", PlayerHomeInfo.SpecialId), ("purpose", "player.home.exit"));
+                        ("buildingId", bid), ("specialId", PlayerHomeInfo.SpecialId),
+                        ("purpose", "player.home.exit"),
+                        ("apartment", Inv(PlayerHomeInfo.ApartmentNumber)));
                     Put(QuarterObjectTypes.PlayerHomeMarker, cx, 0f, cz, rot, 1f, 0.05f, 1f,
                         ("buildingId", bid), ("specialId", PlayerHomeInfo.SpecialId),
                         ("apartment", Inv(PlayerHomeInfo.ApartmentNumber)));
@@ -613,26 +628,105 @@ namespace LifeFromZero.City.Quarter
 
             // ======================= кварталы =======================
 
+            // ---------- северный двор: футбольная площадка (карта района v1.1) ----------
+            /// <summary>Центр футбольной площадки северного двора (карта района v1.1).</summary>
+            private static readonly Vec2 NorthPitchCenter = new Vec2(210f, 660f);
+
+            /// <summary>Размер футбольной площадки северного двора: по X (14 м) и по Z (10 м).</summary>
+            private const float NorthPitchWidth = 14f;
+            private const float NorthPitchDepth = 10f;
+
+            /// <summary>Жилой дом северного квартала: id, архетип, центр, поворот, длина, нормаль фасада.</summary>
+            private readonly struct NorthBuilding
+            {
+                public NorthBuilding(string id, BuildingArchetype arch, float x, float z,
+                                     float rot, float length, Vec2 normal)
+                {
+                    Id = id; Arch = arch; X = x; Z = z; Rot = rot; Length = length; Normal = normal;
+                }
+
+                public string Id { get; }
+                public BuildingArchetype Arch { get; }
+                public float X { get; }
+                public float Z { get; }
+                public float Rot { get; }
+                public float Length { get; }
+                public Vec2 Normal { get; }
+            }
+
+            /// <summary>
+            /// Северный квартал (карта района v1.1): 4 многоквартирных дома, двор с футбольной
+            /// площадкой. Квартира №67 привязана к дому, ВЫБРАННОМУ ПО ДАННЫМ раскладки:
+            /// самый юго-западный дом квартала, стоящий южнее футбольной площадки
+            /// (см. <see cref="PickPlayerHomeId"/>). Координаты дома и двора не дублируются:
+            /// дверь, выход и маркер player.home выводит AddResidential из этих же данных.
+            /// </summary>
             private void BuildNorthQuarter()
             {
-                // Северный квартал: 4 дома, двор с площадкой и лавочками.
+                // Северный квартал: 4 дома, двор с футбольной площадкой и лавочками.
                 AddLawn(new Rect2(160f, 640f, 260f, 680f));
-                AddPlayground(210f, 660f, 14f, 10f);
+                AddPlayground(NorthPitchCenter.X, NorthPitchCenter.Z, NorthPitchWidth, NorthPitchDepth,
+                    ("sport", "football"), ("kind", "pitch"), ("size", "14x10"));
                 AddBench(180f, 650f, 0f);
                 AddBench(240f, 670f, 0f);
                 AddTree(170f, 646f, 3.2f);
                 AddTree(250f, 646f, 3.2f);
                 AddTree(172f, 674f, 3.2f);
                 AddTree(248f, 676f, 3.2f);
-                AddResidential("bld-n1", BuildingArchetype.PanelFiveStorey(), 210f, 690f, 0f, 30f, South, false);
-                AddResidential("bld-n3", BuildingArchetype.PanelFiveStorey(), 210f, 630f, 0f, 30f, North, false);
-                AddResidential("bld-n2", BuildingArchetype.BrickThreeStorey(), 345f, 690f, 0f, 24f, South, false);
-                AddResidential("bld-n4", BuildingArchetype.PanelFiveStorey(), 345f, 630f, 0f, 36f, North, true);
+
+                var buildings = new[]
+                {
+                    new NorthBuilding("bld-n1", BuildingArchetype.PanelFiveStorey(), 210f, 690f, 0f, 30f, South),
+                    new NorthBuilding("bld-n3", BuildingArchetype.PanelFiveStorey(), 210f, 630f, 0f, 30f, North),
+                    new NorthBuilding("bld-n2", BuildingArchetype.BrickThreeStorey(), 345f, 690f, 0f, 24f, South),
+                    new NorthBuilding("bld-n4", BuildingArchetype.PanelFiveStorey(), 345f, 630f, 0f, 36f, North),
+                };
+                Rect2 pitch = Rect2.FromCenterSize(NorthPitchCenter, NorthPitchWidth, NorthPitchDepth);
+                string homeId = PickPlayerHomeId(buildings, pitch);
+                foreach (NorthBuilding b in buildings)
+                    AddResidential(b.Id, b.Arch, b.X, b.Z, b.Rot, b.Length, b.Normal, b.Id == homeId);
+
                 AddLot(new Rect2(286f, 644f, 340f, 662f), 6);
                 AddLot(new Rect2(352f, 644f, 404f, 662f), 6);
                 AddLawn(new Rect2(280f, 664f, 410f, 680f));
                 AddTree(296f, 674f, 3f);
                 AddTree(392f, 674f, 3f);
+            }
+
+            /// <summary>
+            /// Дом квартиры №67 по данным раскладки: самый юго-западный многоквартирный дом
+            /// северного квартала, стоящий южнее футбольной площадки.
+            /// Правило: кандидаты — дома, центр которых южнее нижней границы площадки
+            /// (Z меньше pitch.MinZ); среди них берётся самый западный (минимальный X).
+            /// Ноль кандидатов или несколько домов на одинаковом X — ошибка раскладки,
+            /// а не повод угадывать: генерация останавливается с понятным сообщением.
+            /// </summary>
+            private static string PickPlayerHomeId(IReadOnlyList<NorthBuilding> buildings, Rect2 pitch)
+            {
+                var south = new List<NorthBuilding>();
+                foreach (NorthBuilding b in buildings)
+                    if (b.Z < pitch.MinZ)
+                        south.Add(b);
+                if (south.Count == 0)
+                    throw new InvalidOperationException(
+                        "Квартира №67: ни один дом северного квартала не стоит южнее футбольной площадки " +
+                        "(Z < " + Num(pitch.MinZ) + "). Раскладка изменена — укажите дом player.home явно.");
+
+                float west = south[0].X;
+                foreach (NorthBuilding b in south)
+                    if (b.X < west)
+                        west = b.X;
+
+                var candidates = new List<string>();
+                foreach (NorthBuilding b in south)
+                    if (Math.Abs(b.X - west) < 0.01f)
+                        candidates.Add(b.Id);
+                if (candidates.Count != 1)
+                    throw new InvalidOperationException(
+                        "Квартира №67: юго-западный дом северного квартала определён неоднозначно (" +
+                        string.Join(", ", candidates.ToArray()) + "). Нужен ручной выбор в DistrictMapGenerator.");
+
+                return candidates[0];
             }
 
             private void BuildSouthQuarter()

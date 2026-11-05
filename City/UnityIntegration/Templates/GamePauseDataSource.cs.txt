@@ -1,0 +1,139 @@
+// Life From Zero — шаблон источника данных меню паузы (ТЗ #038), шаг 8.
+//
+// ЭТО НЕ КОМПИЛИРУЕМЫЙ ФАЙЛ: расширение .cs.txt. Установщик его не копирует.
+// Когда понадобятся реальные данные:
+//   1. скопируйте файл в Unity-проект как
+//      Assets/City/PauseMenu/GamePauseDataSource.cs
+//   2. откройте в Unity, дождитесь компиляции;
+//   3. повесьте компонент GamePauseDataSource на объект Pause
+//      и назначьте его в PauseController → Data Source;
+//   4. в коде, где живут реальные системы, выставьте делегаты,
+//      например:  dataSource.ReadMoneyRubles = () => wallet.Balance.Rubles;
+//   5. когда значение изменилось — вызовите dataSource.NotifyChanged().
+//
+// Ни одно поле не выдумывает данные: если делегат не назначен, в меню
+// показывается «Нет данных» (PauseView сам подставляет этот текст).
+// Проценты — 0..100, деньги — целые рубли. Недоступное значение = null.
+//
+// Известные источники данных в репозитории:
+//   деньги:  LifeFromZero.Economy.Core.IWalletAdapter.Balance  (Money.Rubles)
+//   долг:    LifeFromZero.Debts.Core.IDebtReadService.TryGetTotalRemainingRubles(out long rubles)
+//   время:   LifeFromZero.Phone.Core.IPhoneClock.NowMinutes    (GameMinutes)
+//   деньги через мост: UnityIntegrationKit/AdapterBridges.cs → WalletBridge(Func<long> readBalance, …)
+// Остальное (день, локация, цели, здоровье, сытость, энергия, настроение, доход за день)
+// в репозитории отсутствует — берётся только из локальных систем проекта.
+
+using System;
+using LifeFromZero.City.Pause;
+using UnityEngine;
+
+public sealed class GamePauseDataSource : PauseDataSource
+{
+    // Проценты 0..100; null — «Нет данных».
+    public Func<float?> ReadHealth;
+    public Func<float?> ReadSatiety;
+    public Func<float?> ReadEnergy;
+    public Func<float?> ReadMood;
+
+    // Целые рубли; null — «Нет данных».
+    public Func<long?> ReadMoneyRubles;
+    public Func<long?> ReadDebtRubles;
+    public Func<long?> ReadDailyIncomeRubles;
+
+    // Строки; null или пустая строка — «Нет данных».
+    public Func<string> ReadDay;
+    public Func<string> ReadTime;
+    public Func<string> ReadLocation;
+    public Func<string> ReadLocationDetail;
+
+    // До 3 целей; null — блок «Цели» покажет «Нет данных».
+    public Func<PauseGoal[]> ReadGoals;
+
+    /// <summary>Сообщить открытому меню, что данные изменились (без опроса каждый кадр).</summary>
+    public void NotifyChanged()
+    {
+        RaiseChanged();
+    }
+
+    public override PauseSnapshot Read()
+    {
+        return new PauseSnapshot
+        {
+            Day = SafeText(ReadDay),
+            Time = SafeText(ReadTime),
+            Location = SafeText(ReadLocation),
+            LocationDetail = SafeText(ReadLocationDetail),
+            Goals = SafeGoals(ReadGoals),
+            Health = SafeFloat(ReadHealth),
+            Satiety = SafeFloat(ReadSatiety),
+            Energy = SafeFloat(ReadEnergy),
+            Mood = SafeFloat(ReadMood),
+            Money = SafeMoney(ReadMoneyRubles),
+            Debt = SafeMoney(ReadDebtRubles),
+            DailyIncome = SafeMoney(ReadDailyIncomeRubles),
+        };
+    }
+
+    private static float? SafeFloat(Func<float?> read)
+    {
+        if (read == null) return null;
+        try
+        {
+            float? value = read();
+            if (!value.HasValue) return null;
+            float v = value.Value;
+            if (float.IsNaN(v) || float.IsInfinity(v)) return null;
+            return Mathf.Clamp(v, 0f, 100f);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static decimal? SafeMoney(Func<long?> read)
+    {
+        if (read == null) return null;
+        try
+        {
+            long? value = read();
+            return value.HasValue ? (decimal?)value.Value : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static string SafeText(Func<string> read)
+    {
+        if (read == null) return null;
+        try
+        {
+            string value = read();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static PauseGoal[] SafeGoals(Func<PauseGoal[]> read)
+    {
+        if (read == null) return null;
+        try
+        {
+            PauseGoal[] goals = read();
+            if (goals == null || goals.Length == 0) return null;
+            if (goals.Length <= 3) return goals;
+            var trimmed = new PauseGoal[3];
+            Array.Copy(goals, trimmed, 3);
+            return trimmed;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+}

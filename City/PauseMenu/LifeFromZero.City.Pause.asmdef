@@ -1,6 +1,16 @@
 {
-  "name": "LifeFromZero.City.Pause",
-  "rootNamespace": "LifeFromZero.City.Pause",
-  "references": ["Unity.ugui"],
-  "autoReferenced": true
+    "name": "LifeFromZero.City.Pause",
+    "rootNamespace": "LifeFromZero.City.Pause",
+    "references": [
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
 }

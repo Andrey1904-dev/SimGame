@@ -66,6 +66,19 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         private QuarterUnityAdapter _adapter;
         private int _errorCount;
 
+        /// <summary>
+        /// Последний построенный план (ТЗ #039, привязка квартиры №67): null до первой
+        /// генерации и после Clear(). Нужен привязкам, которые ставят точки входа/выхода
+        /// дома по данным плана, а не по именам объектов в сцене.
+        /// </summary>
+        public QuarterPlan LastPlan { get; private set; }
+
+        /// <summary>
+        /// Событие «план построен» (вызывается после успешного Build). Подписчик получает
+        /// готовый QuarterPlan один раз за генерацию — опрос в Update не нужен.
+        /// </summary>
+        public event Action<QuarterPlan> PlanBuilt;
+
         /// <summary>Последняя сводка генерации (та же, что видна в Inspector).</summary>
         public CityGenerationReport LastReport => lastReport;
         /// <summary>Seed из Inspector (меняется до Play или между генерациями из кода).</summary>
@@ -111,6 +124,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 stopwatch.Stop();
 
                 bool repeat = lastReport.GenerationCount > 0;
+                LastPlan = plan;
                 lastReport = new CityGenerationReport
                 {
                     Seed = plan.Seed,
@@ -131,6 +145,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                     ", точек доставки=" + plan.DeliveryPoints.Count +
                     ", время=" + lastReport.GenerationTimeMs.ToString("0") + " мс" +
                     (repeat ? " (повторный Build: предыдущий квартал уничтожен)" : "") + ".");
+                NotifyPlanBuilt(plan);
                 return lastReport;
             }
             catch (Exception e)
@@ -152,6 +167,25 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             if (_adapter != null)
                 _adapter.ClearBuilt();
             lastReport.RootName = "";
+            LastPlan = null;
+        }
+
+        /// <summary>Оповещает подписчиков; ошибка подписчика не отменяет построенный город.</summary>
+        private void NotifyPlanBuilt(QuarterPlan plan)
+        {
+            Action<QuarterPlan> handler = PlanBuilt;
+            if (handler == null)
+                return;
+            try
+            {
+                handler(plan);
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogError(
+                    "[CityBootstrap] обработчик PlanBuilt завершился ошибкой: " + e.Message +
+                    " Город уже построен, генерация не отменена.");
+            }
         }
 
         private QuarterUnityAdapter Adapter()
