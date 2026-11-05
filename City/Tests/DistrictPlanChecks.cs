@@ -323,9 +323,18 @@ namespace LifeFromZero.City.Quarter.Tests
             foreach (PlanPoint p in s.Access)
             {
                 int x = (int)Math.Floor(p.Position.X), z = (int)Math.Floor(p.Position.Z);
-                if (x < 0 || z < 0 || x >= n || z >= n || !seen[x * n + z])
+                if (x < 0 || z < 0 || x >= n || z >= n || !seen[x * n + z] || IsPointBlocked(s, p.Position))
                     v.Add("недостижима точка (" + p.Kind + "): " + p.Name);
             }
+        }
+
+        private static bool IsPointBlocked(LayoutSnapshot s, Vec2 p)
+        {
+            foreach (PlanRect b in s.Blockers)
+                if (p.X > b.Rect.MinX + Eps && p.X < b.Rect.MaxX - Eps &&
+                    p.Z > b.Rect.MinZ + Eps && p.Z < b.Rect.MaxZ - Eps)
+                    return true;
+            return false;
         }
 
         private static void CheckRequiredIds(LayoutSnapshot s, List<string> v)
@@ -432,7 +441,7 @@ namespace LifeFromZero.City.Quarter.Tests
                 for (int z = z0; z <= z1; z++)
                 {
                     float cx = x + 0.5f, cz = z + 0.5f;
-                    if (cx >= r.MinX && cx <= r.MaxX && cz >= r.MinZ && cz <= r.MaxZ)
+                    if (cx > r.MinX + Eps && cx < r.MaxX - Eps && cz > r.MinZ + Eps && cz < r.MaxZ - Eps)
                         blocked[x * n + z] = true;
                 }
         }

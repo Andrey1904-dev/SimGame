@@ -199,6 +199,11 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             door.transform.localScale = new Vector3(1.1f, 2.1f, 0.1f);
             door.GetComponent<Renderer>().sharedMaterial = MaterialFromHex(doorColor, "entrance.door");
             door.isStatic = true;
+            if (!addColliders)
+            {
+                var doorCollider = door.GetComponent<Collider>();
+                if (doorCollider != null) Destroy(doorCollider);
+            }
 
             var canopy = GameObject.CreatePrimitive(PrimitiveType.Cube);
             canopy.name = "entrance.canopy" + suffix;
@@ -269,6 +274,11 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             door.transform.localScale = new Vector3(obj.Size.X, obj.Size.Y, obj.Size.Z);
             door.GetComponent<Renderer>().sharedMaterial = MaterialFor(QuarterObjectTypes.BasementDoor);
             // Коллайдер от CreatePrimitive остаётся и едет вместе с дверью на петле.
+            if (!addColliders)
+            {
+                var doorCollider = door.GetComponent<Collider>();
+                if (doorCollider != null) Destroy(doorCollider);
+            }
 
             var component = pivot.AddComponent<BasementDoor>();
             component.Configure(new BasementDoorController(BasementDoorState.Locked));
@@ -689,7 +699,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 UnityEngine.Object.DestroyImmediate(existing);
                 existing = null;
             }
-            if (existing != null && !NeedsCollider(obj.TypeId))
+            if (existing != null && (!addColliders || !NeedsCollider(obj.TypeId)))
                 Destroy(existing);
             return go;
         }

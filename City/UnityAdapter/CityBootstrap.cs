@@ -74,6 +74,14 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         public bool GenerateOnStart { get => generateOnStart; set => generateOnStart = value; }
         /// <summary>Выбранный макет (QuarterLayoutIds.Quarter250 или District750).</summary>
         public string LayoutId { get => layoutId; set => layoutId = value; }
+        /// <summary>Добавлять ли коллайдеры при построении города.</summary>
+        public bool AddColliders { get => addColliders; set => addColliders = value; }
+
+        private void Awake()
+        {
+            // Гарантируем отключение автозапуска QuarterUnityAdapter до любого Start().
+            Adapter();
+        }
 
         private void Start()
         {
@@ -93,7 +101,9 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             var stopwatch = Stopwatch.StartNew();
             try
             {
-                QuarterPlan plan = layoutId == QuarterLayoutIds.District750
+                bool isDistrict = string.Equals(layoutId != null ? layoutId.Trim() : null,
+                    QuarterLayoutIds.District750, StringComparison.OrdinalIgnoreCase);
+                QuarterPlan plan = isDistrict
                     ? DistrictMapGenerator.Generate(seed)
                     : QuarterGenerator.Generate(seed);
                 QuarterUnityAdapter adapter = Adapter();
@@ -151,12 +161,12 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
                 _adapter = GetComponent<QuarterUnityAdapter>();
                 if (_adapter == null)
                     _adapter = gameObject.AddComponent<QuarterUnityAdapter>();
-                // Автозапуск адаптера выключаем: генерацией управляет Bootstrap,
-                // иначе в Start построились бы два квартала.
-                _adapter.BuildOnStart = false;
-                _adapter.AddColliders = addColliders;
-                _adapter.Seed = seed;
             }
+            // Автозапуск адаптера выключаем: генерацией управляет Bootstrap,
+            // иначе в Start построились бы два квартала.
+            _adapter.BuildOnStart = false;
+            _adapter.AddColliders = addColliders;
+            _adapter.Seed = seed;
             return _adapter;
         }
     }

@@ -38,7 +38,7 @@ namespace LifeFromZero.City.Pause
         }
         private void Unsubscribe()
         {
-            if (subscribed && dataSource != null) dataSource.Changed -= OnDataChanged;
+            if (subscribed && !ReferenceEquals(dataSource, null)) dataSource.Changed -= OnDataChanged;
             subscribed = false;
         }
         private void OnDataChanged() { if (IsOpen) Refresh(); }
@@ -54,19 +54,24 @@ namespace LifeFromZero.City.Pause
         public bool Open()
         {
             if (IsOpen || integration == null || !integration.CanOpenPause()) return false;
+            float savedTimeScale = Time.timeScale;
+            bool savedCursorVisible = Cursor.visible;
+            CursorLockMode savedCursorLock = Cursor.lockState;
             IDisposable acquired = integration.AcquireGameplayLock();
             if (acquired == null) return false;
             gameplayLock = acquired;
-            previousTimeScale = Time.timeScale;
-            previousCursorVisible = Cursor.visible;
-            previousCursorLock = Cursor.lockState;
+            previousTimeScale = savedTimeScale;
+            previousCursorVisible = savedCursorVisible;
+            previousCursorLock = savedCursorLock;
             state.Open();
             try
             {
+                if (view == null) view = PauseView.Create(transform, this);
                 Time.timeScale = 0f;
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
                 EnsureEventSystem();
+                if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
                 Refresh();
                 view.gameObject.SetActive(true);
                 return true;
@@ -76,13 +81,20 @@ namespace LifeFromZero.City.Pause
         public void Close()
         {
             if (!state.Close()) return;
-            if (view != null) view.gameObject.SetActive(false);
-            if (ownedEventSystem != null) { ownedEventSystem.SetActive(false); Destroy(ownedEventSystem); ownedEventSystem = null; }
-            Time.timeScale = previousTimeScale;
-            Cursor.lockState = previousCursorLock;
-            Cursor.visible = previousCursorVisible;
             var token = gameplayLock; gameplayLock = null;
-            token?.Dispose();
+            try
+            {
+                if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+                if (view != null) view.gameObject.SetActive(false);
+                if (ownedEventSystem != null) { ownedEventSystem.SetActive(false); Destroy(ownedEventSystem); ownedEventSystem = null; }
+            }
+            finally
+            {
+                Time.timeScale = previousTimeScale;
+                Cursor.lockState = previousCursorLock;
+                Cursor.visible = previousCursorVisible;
+                token?.Dispose();
+            }
         }
         public void Refresh()
         {
@@ -108,13 +120,13 @@ namespace LifeFromZero.City.Pause
 #if ENABLE_INPUT_SYSTEM
             // Avoid a hard assembly dependency if the package is absent. Only executed on open.
             var module = Type.GetType("UnityEngine.InputSystem.UI.InputSystemUIInputModule, Unity.InputSystem");
-            if (module != null) ownedEventSystem.AddComponent(module);
-            else Debug.LogError("Pause: Input System UI module not found; supply an EventSystem.");
-#elif ENABLE_LEGACY_INPUT_MANAGER
-            ownedEventSystem.AddComponent<StandaloneInputModule>();
-#else
-            Debug.LogError("Pause: no UI input module available; supply an EventSystem.");
+            if (module != null) { ownedEventSystem.AddComponent(module); return; }
 #endif
+#if ENABLE_LEGACY_INPUT_MANAGER
+            ownedEventSystem.AddComponent<StandaloneInputModule>();
+            return;
+#endif
+            Debug.LogError("Pause: no UI input module available; supply an EventSystem.");
         }
         private void SceneLoaded(Scene scene, LoadSceneMode mode)
         {

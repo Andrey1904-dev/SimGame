@@ -42,6 +42,7 @@ namespace LifeFromZero.City.Quarter.Tests
             suite.Add("Негатив: дублирующаяся дорога обнаруживается", NegativeDuplicateRoad);
             suite.Add("Негатив: АЗС-4 на старом месте (далеко от ломбарда) обнаруживается", NegativeAzs4OldSpot);
             suite.Add("Негатив: блокер на точке погрузки обнаруживается", NegativeLoadingBlocksDelivery);
+            suite.Add("Негатив: заблокированный подъезд жилого дома обнаруживается", NegativeBlockedEntrance);
             suite.Add("Негатив: запрещённый объект и пропавший обязательный объект обнаруживаются", NegativeForbiddenAndMissing);
             // --- детерминизм и повторная генерация ---
             suite.Add("District750: детерминирован по seed (два прогона совпадают полностью)", Deterministic);
@@ -97,6 +98,9 @@ namespace LifeFromZero.City.Quarter.Tests
             QuarterPlan plan = District();
             AreEqual(24, plan.DistrictPoints.Count, "Точек карты (как в district_layout_check.py)");
             AreEqual(46, plan.DeliveryPoints.Count, "Точек доставки (как в district_layout_check.py)");
+            AreEqual(974, plan.Objects.Count, "Объектов плана (как в district_layout_check.py)");
+            AreEqual(82, plan.Roads.Count, "Дорожных сегментов (как в district_layout_check.py)");
+            AreEqual(59, plan.Nodes.Count, "Узлов дорожного графа (как в district_layout_check.py)");
         }
 
         // ---------------------------------------------------------------- правила
@@ -231,6 +235,16 @@ namespace LifeFromZero.City.Quarter.Tests
             // Блокер ровно на клетке точки доставки на погрузке (652, 662).
             s.Blockers.Add(new PlanRect("test-block", "test", new Rect2(651.5f, 661.5f, 652.5f, 662.5f)));
             ExpectViolation(s, "недостижима", "точка погрузки закрыта блокером");
+        }
+
+        private static void NegativeBlockedEntrance()
+        {
+            LayoutSnapshot s = Snap();
+            PlanPoint entrance = s.Access.First(p => p.Name == "bld-n2.entrance1");
+            s.Blockers.Add(new PlanRect("test-entrance-block", "test",
+                new Rect2(entrance.Position.X - 0.6f, entrance.Position.Z - 0.6f,
+                          entrance.Position.X + 0.6f, entrance.Position.Z + 0.6f)));
+            ExpectViolation(s, "bld-n2.entrance1", "подъезд bld-n2.entrance1 закрыт блокером");
         }
 
         private static void NegativeForbiddenAndMissing()

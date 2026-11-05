@@ -36,7 +36,7 @@ namespace LifeFromZero.City.Pause
             var canvas = GetComponent<Canvas>(); canvas.renderMode = RenderMode.ScreenSpaceOverlay; canvas.sortingOrder = 30000;
             var scaler = GetComponent<CanvasScaler>(); scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1568, 882); scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.Expand;
-            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf") ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
             rounded = MakeRounded();
             var root = Rect("Safe frame", transform, 0, 0, 1, 1);
             var fitter = root.gameObject.AddComponent<AspectRatioFitter>();
@@ -64,8 +64,8 @@ namespace LifeFromZero.City.Pause
             var header = Panel("Header", right, .025f, .845f, .975f, .975f, SubColor);
             day = Label(header, "Нет данных", .025f, .16f, .39f, .85f, 25, FontStyle.Normal, TextAnchor.MiddleLeft, White);
             time = Label(header, "Нет данных", .4f, .16f, .59f, .85f, 25, FontStyle.Normal, TextAnchor.MiddleLeft, White);
-            location = Label(header, "Нет данных", .64f, .46f, .98f, .9f, 23, FontStyle.Normal, TextAnchor.MiddleLeft, White);
-            locationDetail = Label(header, "", .64f, .08f, .98f, .48f, 18, FontStyle.Normal, TextAnchor.MiddleLeft, new Color(.75f,.75f,.75f));
+            location = Label(header, "Нет данных", .64f, .48f, .98f, .9f, 23, FontStyle.Normal, TextAnchor.MiddleLeft, White);
+            locationDetail = Label(header, "", .64f, .08f, .98f, .46f, 18, FontStyle.Normal, TextAnchor.MiddleLeft, new Color(.75f,.75f,.75f));
             var goalPanel = Panel("Goals", right, .025f, .435f, .49f, .815f, SubColor);
             Heading(goalPanel, "◎   Цели");
             for (int i = 0; i < 3; i++)
@@ -93,7 +93,7 @@ namespace LifeFromZero.City.Pause
             for (int i = 0; i < 3; i++)
             {
                 float y = .63f - .20f * i;
-                Label(finance, fin[i], .08f, y - .08f, .59f, y + .08f, 21, FontStyle.Normal, TextAnchor.MiddleLeft, White);
+                Label(finance, fin[i], .08f, y - .08f, .52f, y + .08f, 21, FontStyle.Normal, TextAnchor.MiddleLeft, White);
                 financeValues[i] = Label(finance, "Нет данных", .53f, y - .08f, .94f, y + .08f, 21, FontStyle.Normal, TextAnchor.MiddleRight, White);
             }
             var links = Panel("Quick links", right, .44f, .035f, .975f, .405f, SubColor);
@@ -147,7 +147,8 @@ namespace LifeFromZero.City.Pause
         {
             var r = Panel("Button", parent, x0, y0, x1, y1, new Color(.14f,.14f,.14f,.96f));
             var button = r.gameObject.AddComponent<Button>(); button.targetGraphic = r.GetComponent<Image>(); button.targetGraphic.raycastTarget = true;
-            var colors = button.colors; colors.normalColor = Color.white; colors.highlightedColor = new Color(1.16f,1.16f,1.16f); colors.pressedColor = new Color(.8f,.8f,.8f); colors.selectedColor = new Color(1.08f,1.08f,1.08f); colors.disabledColor = new Color(.65f,.65f,.65f); button.colors = colors;
+            button.navigation = new Navigation { mode = Navigation.Mode.None };
+            var colors = button.colors; colors.normalColor = Color.white; colors.highlightedColor = new Color(1.16f,1.16f,1.16f); colors.pressedColor = new Color(.8f,.8f,.8f); colors.selectedColor = colors.normalColor; colors.disabledColor = new Color(.65f,.65f,.65f); button.colors = colors;
             button.onClick.AddListener(click);
             label = Label(r, text, .07f, .06f, .95f, .94f, 24, FontStyle.Normal, TextAnchor.MiddleLeft, White);
             return button;

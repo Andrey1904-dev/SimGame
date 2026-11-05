@@ -82,10 +82,26 @@ namespace LifeFromZero.City.Pause.Tests
             var disabledInput = root.AddComponent<TestPlayerInput>(); disabledInput.enabled = false;
             var adapter = root.AddComponent<StandalonePauseIntegration>();
             var field = typeof(StandalonePauseIntegration).GetField("playerInputBehaviours", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            field.SetValue(adapter, new Behaviour[] { enabledInput, disabledInput });
+            // Also verify duplicate Behaviour references in Inspector do not leave enabledInput disabled on Close().
+            field.SetValue(adapter, new Behaviour[] { enabledInput, enabledInput, disabledInput });
             pause.Configure(adapter, null);
             Assert.IsTrue(pause.Open()); Assert.IsFalse(enabledInput.enabled); Assert.IsFalse(disabledInput.enabled);
             pause.Close(); Assert.IsTrue(enabledInput.enabled); Assert.IsFalse(disabledInput.enabled);
+            // Reject pause-own components in playerInputBehaviours so pause cannot disable itself.
+            field.SetValue(adapter, new Behaviour[] { enabledInput, pause });
+            Assert.IsFalse(pause.Open());
+            yield return null;
+        }
+        [UnityTest] public IEnumerator MissingIntegrationAndButtonNavigationAreSafe()
+        {
+            pause.Configure(null, null);
+            pause.HandleEscape();
+            Assert.IsFalse(pause.IsOpen);
+            foreach (var button in pause.ViewObject.GetComponentsInChildren<Button>(true))
+            {
+                Assert.AreEqual(Navigation.Mode.None, button.navigation.mode);
+                Assert.AreEqual(button.colors.normalColor, button.colors.selectedColor);
+            }
             yield return null;
         }
         [UnityTest] public IEnumerator DuplicateAcrossScenesDoesNotReplaceInstance()
