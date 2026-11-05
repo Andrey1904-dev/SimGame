@@ -172,13 +172,13 @@ namespace LifeFromZero.UI.Editor
             {
                 SceneManager.SetActiveScene(scene);
 
-                if (HasForeignPause(scene))
+                // В проекте УЖЕ есть пауза (City.Pause). Дублировать её нельзя, поэтому
+                // установщик не блокирует сцену, а переводит UI в режим «пауза занята»:
+                // меню открывает существующий City.Pause, а наш экран — только его вид.
+                Package pause = FindExistingPause(scene);
+                if (pause != null)
                 {
-                    result.Blocked = true;
-                    result.Blockers.Add("в сцене уже есть чужое меню паузы (не «" + RootObjectName +
-                                        "»). Два меню хуже одного: удалите старое вручную или оставьте его. " +
-                                        "Установщик ничего не изменил.");
-                    return result;
+                    result.AlreadyDone.Add("пауза игры: " + pause.Hint + " — UI будет использовать её, второго меню не будет");
                 }
 
                 GameObject root = FindRoot(scene);
@@ -239,6 +239,11 @@ namespace LifeFromZero.UI.Editor
 
                     if (root.GetComponent<UiBootstrap>() == null) root.AddComponent<UiBootstrap>();
 
+                    // Мост к существующим системам: позиция игрока (камера) и, если в
+                    // сцене есть City.Pause, — источник данных и передача действий.
+                    if (root.GetComponent<UiGameBridge>() == null) root.AddComponent<UiGameBridge>();
+                    if (root.GetComponent<PauseUiSnapshotSource>() == null) root.AddComponent<PauseUiSnapshotSource>();
+
                     // UiBootstrap сам создаёт экраны в Awake, но если проект запускает
                     // интерфейс из кода (UiBootstrap.Ensure) — экраны всё равно нужны.
                     // Поэтому кладём их в сцену один раз, а не полагаемся на рантайм.
@@ -280,27 +285,41 @@ namespace LifeFromZero.UI.Editor
         private static void AddManualSteps(UiInstallResult result)
         {
             result.ManualSteps.Add(
-                "Назначить в UiBootstrap поле World Adapter (компонент-наследник UiWorldAdapter: " +
-                "позиция игрока, блокировка ввода, действия меню).");
+                "UiGameBridge → Player Input Behaviours: перетащить компоненты движения и камеры " +
+                "(без них персонаж продолжит двигаться при открытом окне). " +
+                "Tools → Life From Zero → Report input candidates показывает кандидатов.");
             result.ManualSteps.Add(
-                "Назначить поле Snapshot Source (наследник UiSnapshotSource: часы, деньги, долги, " +
-                "потребности, цели). Без него пауза и HUD покажут «Нет данных».");
+                "UiGameBridge → Player: если камера не от первого лица, указать трансформ игрока " +
+                "(по умолчанию берётся камера).");
             result.ManualSteps.Add(
-                "Подключить телефон: реализовать IPhoneDataSource (ReadPhone/TryRun) поверх PhoneFacade " +
-                "и DeliveryService — см. UI/CODEX_EXECUTE.md, шаги 3–5.");
+                "UiGameBridge → Gameplay HUD Roots: объекты игрового HUD, которые должны скрываться " +
+                "при открытом UI (иначе будут видны поверх телефона и паузы).");
             result.ManualSteps.Add(
-                "Передать план района: UiBootstrap.SetDistrictPlan(plan) после генерации города " +
-                "или назначить District Source = QuarterUnityAdapter (он реализует IQuarterPlanSource).");
+                "Телефон: реализовать IPhoneDataSource (ReadPhone/TryRun) и отдать его в UiBootstrap, " +
+                "либо реализовать интерфейс на PauseUiSnapshotSource. Сейчас телефон показывает каркас.");
             result.ManualSteps.Add(
-                "Если в проекте уже есть свой роутер Esc/P/M — выключить у UiRouter флаг Read Keyboard, " +
-                "иначе клавиши обработаются дважды.");
+                "Заказы: реализовать IDeliveryUiBridge (accept/cancel/complete) и назначить в " +
+                "UiBootstrap → Delivery System. В репозитории нет DeliveryService, поэтому вызывать нечего.");
             result.ManualSteps.Add(
-                "Старое меню паузы (City/Pause/PauseView + StandalonePauseIntegration) отключить в сцене " +
-                "осознанно: новый экран уже умеет всё, что умел он.");
+                "Если сцене нужен план района не из QuarterUnityAdapter — вызвать " +
+                "UiBootstrap.SetDistrictPlan(plan) после генерации города.");
+            result.ManualSteps.Add(
+                "Проверить, что PauseKeyboardInput (если есть) включён ровно один раз: " +
+                "UiBootstrap сам выключает чтение клавиш у UiRouter, когда находит City.Pause.");
         }
 
-        /// <summary>Есть ли в сцене чужое меню паузы (не наш PauseMenuScreen).</summary>
-        private static bool HasForeignPause(Scene scene)
+        /// <summary>Найденная в сцене существующая пауза проекта (City.Pause).</summary>
+        private sealed class Package
+        {
+            public string Hint;
+        }
+
+        /// <summary>
+        /// Ищет паузу, которая уже есть в сцене. Возвращает её описание или null.
+        /// Типы ищутся по имени, а не по типу: установщик не должен ломаться, если
+        /// проект переименует свой класс паузы.
+        /// </summary>
+        private static Package FindExistingPause(Scene scene)
         {
             foreach (GameObject root in scene.GetRootGameObjects())
             {
@@ -308,15 +327,12 @@ namespace LifeFromZero.UI.Editor
                 {
                     if (behaviour == null) continue;
                     string name = behaviour.GetType().Name;
-                    if (name == "PauseView" || name == "StandalonePauseIntegration" ||
-                        name == "PauseController" || name == "PauseKeyboardInput")
-                    {
-                        // Наше собственное меню тоже содержит PauseKeyboardInput? Нет — он из City.Pause.
-                        return true;
-                    }
+                    if (name == "PauseController") return new Package { Hint = "PauseController найден" };
+                    if (name == "StandalonePauseIntegration") return new Package { Hint = "StandalonePauseIntegration найден" };
+                    if (name == "PauseKeyboardInput") return new Package { Hint = "PauseKeyboardInput найден" };
                 }
             }
-            return false;
+            return null;
         }
 
         private static void AddScreen<T>(GameObject root, string name) where T : Component, new()

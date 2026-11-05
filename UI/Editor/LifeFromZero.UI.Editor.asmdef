@@ -5,6 +5,7 @@
         "LifeFromZero.UI",
         "LifeFromZero.UI.Core",
         "LifeFromZero.City.Quarter",
+        "LifeFromZero.City.Pause",
         "LifeFromZero.City.Quarter.UnityAdapter"
     ],
     "includePlatforms": [

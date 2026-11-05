@@ -127,6 +127,24 @@ namespace LifeFromZero.UI.Runtime
 
         public bool IsModalOpen => _states.IsModalOpen;
 
+        /// <summary>
+        /// Останавливать ли время самому. Выключается, когда в сцене уже есть
+        /// City.Pause: иначе два владельца Time.timeScale будут мешать друг другу
+        /// (второй «продолжит» игру, пока первый ещё в паузе).
+        /// </summary>
+        public bool FallbackTimeScalePause
+        {
+            get { return fallbackTimeScalePause; }
+            set { fallbackTimeScalePause = value; }
+        }
+
+        /// <summary>Читать ли клавиши самому (P/M/Esc).</summary>
+        public bool ReadsKeyboard
+        {
+            get { return readKeyboard; }
+            set { readKeyboard = value; }
+        }
+
         /// <summary>Единый сервис навигации (маршрут, метки).</summary>
         public NavigationService Navigation { get; private set; }
 

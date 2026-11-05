@@ -10,6 +10,9 @@ sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(_
 from run import compile_to_image
 files = (sorted(glob.glob('UI/Core/*.cs')) + sorted(glob.glob('UI/Runtime/*.cs'))
          + sorted(glob.glob('City/Quarter/*.cs')) + sorted(glob.glob('City/Quarter/DistrictMap/*.cs'))
+         # City.Pause: UI использует существующую паузу проекта. Берём только контракты —
+         # PauseView тянет uGUI, который в стабах не нужен.
+         + ['City/PauseMenu/PauseContracts.cs']
          + ['UI/Tools/unitystubs/UnityStubs.cs'])
 ok, errs, warns, ms = compile_to_image(files)
 seen=set()

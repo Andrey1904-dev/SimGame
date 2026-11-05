@@ -18,6 +18,9 @@ files = (sorted(glob.glob('UI/Core/*.cs'))
          + sorted(glob.glob('UI/Editor/*.cs'))
          + sorted(glob.glob('City/Quarter/*.cs'))
          + sorted(glob.glob('City/Quarter/DistrictMap/*.cs'))
+         # City.Pause: UI использует существующую паузу проекта. Только контракты —
+         # PauseView тянет uGUI, который в стабах не нужен и не покрыт.
+         + ['City/PauseMenu/PauseContracts.cs']
          + ['UI/Tools/unitystubs/UnityStubs.cs', 'UI/Tools/editorstubs/EditorStubs.cs'])
 
 ok, errs, warns, ms = compile_to_image(files)

@@ -141,6 +141,7 @@ namespace LifeFromZero.UI.Runtime
 
             ResolveWorld();
             ResolveSnapshot();
+            ResolvePauseOwner();
             ResolveDistrict();
 
             if (createScreens) CreateScreens();
@@ -165,6 +166,50 @@ namespace LifeFromZero.UI.Runtime
             if (router == null) router = gameObject.AddComponent<UiRouter>();
             Report.Ok("UiRouter");
             return router;
+        }
+
+        /// <summary>
+        /// В проекте уже есть City.Pause (PauseController + PauseView, клавиши Esc/P).
+        /// Держать второе меню паузы нельзя: Esc откроет оба, а Time.timeScale будет
+        /// останавливать и продолжать каждый по-своему. Поэтому приоритет у существующей
+        /// паузы: наш экран паузы становится её видом (Render/Confirm), а действия
+        /// меню уходят в её PauseIntegration.
+        /// </summary>
+        private void ResolvePauseOwner()
+        {
+            var bridge = FindAnyObjectByType<UiGameBridge>();
+            if (bridge == null) bridge = worldAdapter as UiGameBridge;
+
+            if (bridge != null && bridge.HasExistingPause)
+            {
+                _existingPause = bridge.ExistingPause;
+                _router.FallbackTimeScalePause = false;
+                // Экран паузы рисует данные существующей паузы, а не свои.
+                if (snapshotSource == null)
+                {
+                    var adapter = bridge.GetComponent<PauseUiSnapshotSource>();
+                    if (adapter != null)
+                    {
+                        snapshotSource = adapter;
+                        Report.Ok("данные HUD/паузы из PauseDataSource игры");
+                    }
+                }
+                // Клавиши Esc/P/M в проекте уже обрабатывает PauseKeyboardInput →
+                // PauseController. Если читать их ещё и здесь, меню будут открываться
+                // и закрываться одним нажатием одновременно.
+                _router.ReadsKeyboard = false;
+                Report.Ok("пауза игры (City.Pause): второй Time.timeScale и вторые клавиши отключены");
+            }
+            else if (bridge != null)
+            {
+                Report.Miss("City.Pause — меню паузы на своём Time.timeScale; " +
+                            "клавиши Esc/P читает только UiRouter");
+            }
+            else
+            {
+                Report.Miss("UiGameBridge — адаптер мира не найден: клавиши P/M/Esc читает сам UiRouter, " +
+                            "позиция игрока неизвестна");
+            }
         }
 
         private void ResolveWorld()
@@ -241,6 +286,7 @@ namespace LifeFromZero.UI.Runtime
 
         private QuarterMapGeometry _mapGeometry;
         private QuarterPlan _plan;
+        private LifeFromZero.City.Pause.PauseIntegration _existingPause;
 
         private static QuarterPlan _externalPlan;
 

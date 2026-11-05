@@ -3,7 +3,8 @@
     "rootNamespace": "LifeFromZero.UI.Runtime",
     "references": [
         "LifeFromZero.UI.Core",
-        "LifeFromZero.City.Quarter"
+        "LifeFromZero.City.Quarter",
+        "LifeFromZero.City.Pause"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

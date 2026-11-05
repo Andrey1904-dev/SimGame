@@ -115,6 +115,12 @@ namespace UnityEngine
         public bool activeSelf => true;
         public void SetActive(bool v) {}
     }
+    public class Camera : Behaviour {
+        public static Camera main => null;
+        public Transform transform => gameObject.transform;
+        public bool orthographic { get; set; }
+        public float orthographicSize { get; set; }
+    }
     public class Component : Object {
         public T GetComponentInChildren<T>(bool includeInactive = false) => default(T);
         public T[] GetComponentsInChildren<T>(bool includeInactive = false) => new T[0];
@@ -141,6 +147,7 @@ namespace UnityEngine
         public Vector3 localPosition { get; set; }
         public Vector3 localScale { get; set; } = Vector3.one;
         public Vector3 localEulerAngles { get; set; }
+        public Vector3 eulerAngles { get; set; }
         public Transform parent { get; set; }
         public int childCount => 0;
         public void SetParent(Transform p, bool worldPositionStays) { parent = p; }
