@@ -266,13 +266,22 @@ run_unity_tests() {
     local log="$REPORT_DIR/stage$num-$platform.log"
     if "$UNITY_BIN" -batchmode -projectPath "$UNITY_PROJECT" -runTests -testPlatform "$platform" \
         -testResults "$results" -logFile "$log" -quit >/dev/null 2>&1; then
-        local total failed
-        total=$(grep -c '<test-case ' "$results" 2>/dev/null | tr -d ' ')
-        failed=$(grep '<test-case ' "$results" 2>/dev/null | grep -c 'result="Failed"' | tr -d ' ')
-        if [ "${failed:-0}" -gt 0 ]; then
-            record "FAIL" "$num" "$name" "$failed из $total тестов упали (см. $(basename "$results"))"
+        if python3 - "$results" <<'PYXML'
+import sys, xml.etree.ElementTree as ET
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+    cases = list(root.iter('test-case'))
+    if not cases or any(c.get('result') not in ('Passed',) for c in cases):
+        raise ValueError('нет тестов или есть не прошедшие/пропущенные тесты')
+    print('Unity test cases:', len(cases))
+except (OSError, ET.ParseError, ValueError) as e:
+    print('Некорректный или неполный результат:', e, file=sys.stderr)
+    sys.exit(1)
+PYXML
+        then
+            record "PASS" "$num" "$name" "результат XML проверен: $results"
         else
-            record "PASS" "$num" "$name" "тестов: ${total:-0}, упавших: 0 ($platform)"
+            record "FAIL" "$num" "$name" "нет достоверного успешного XML: $results"
         fi
     else
         record "FAIL" "$num" "$name" "Unity завершился с ошибкой (см. $(basename "$log"))"

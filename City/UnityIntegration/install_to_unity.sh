@@ -183,6 +183,7 @@ PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/lfz_install_plan.XXXXXX")" || die "$EXIT_ER
 ASM_INDEX="$(mktemp "${TMPDIR:-/tmp}/lfz_asm_index.XXXXXX")" || die "$EXIT_ERROR" "не удалось создать временный файл"
 trap 'rm -f "$PLAN_FILE" "$ASM_INDEX"' EXIT INT TERM
 
+command -v python3 >/dev/null 2>&1 || die "$EXIT_SOURCES" "python3 необходим для проверки дубликатов"
 if command -v python3 >/dev/null 2>&1; then
     python3 - "$PROJECT_ROOT" >"$ASM_INDEX" <<'PY'
 import glob, json, os, sys
@@ -192,8 +193,9 @@ by_name = {}
 for p in sorted(glob.glob(os.path.join(assets, "**/*.asmdef"), recursive=True)):
     try:
         name = json.load(open(p, encoding="utf-8")).get("name", "")
-    except Exception:
-        continue
+    except Exception as e:
+        print(f"Невозможно прочитать asmdef {p}: {e}", file=sys.stderr)
+        sys.exit(5)
     if not name:
         continue
     rel_dir = os.path.relpath(os.path.dirname(p), root).replace("\\", "/")
@@ -208,6 +210,7 @@ for anchor in ("PauseKeyboardInput.cs", "LifeFromZeroGameIntegration.cs", "Playe
     if hits:
         print("ANCHOR\t" + anchor + "\t" + "|".join(hits))
 PY
+    [ "$?" -eq 0 ] || die "$EXIT_CONFLICT" "не удалось проверить asmdef в проекте"
 fi
 
 DUP_ASM_ERRORS=0
@@ -352,6 +355,31 @@ if [ "$MODE" = "dry-run" ]; then
     info "  Для установки повторите команду с --apply."
     exit "$EXIT_OK"
 fi
+
+# Перед каждой записью обязательно выполнить отдельный dry-run с теми же параметрами.
+# Это не заменяет проверку плана человеком и полного снимка проекта.
+if [ -e "$PROJECT_ROOT/Temp/UnityLockfile" ]; then
+    die "$EXIT_PROJECT" "закройте Unity перед копированием"
+fi
+args=("$PROJECT_ROOT" --dry-run)
+[ "$WITH_DOMAIN_TESTS" = "yes" ] && args+=(--with-domain-tests)
+[ "$ALLOW_OVERWRITE" = "yes" ] && args+=(--overwrite)
+bash "$SCRIPT_SOURCE" "${args[@]}" || die "$EXIT_CONFLICT" "обязательный dry-run не пройден; запись отменена"
+
+# Запрет симлинков в пути назначения: лексическая проверка Assets/ их не выявляет.
+while IFS=$'\t' read -r status src dst; do
+    [ "$status" = "ADD" ] || [ "$status" = "CONFLICT" ] || continue
+    python3 - "$PROJECT_ROOT/Assets" "$dst" <<'PYSAFE' || die "$EXIT_CONFLICT" "симлинк в пути назначения: $dst"
+import os, sys
+root, path = sys.argv[1:]
+p = path
+while p != os.path.dirname(p):
+    if os.path.islink(p): sys.exit(1)
+    if p == root: break
+    p = os.path.dirname(p)
+else: sys.exit(1)
+PYSAFE
+done <"$PLAN_FILE"
 
 # ---------- 8. резервная копия конфликтующих файлов (при --overwrite) ----------
 BACKUP_DIR=""
