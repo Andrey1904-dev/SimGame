@@ -1,0 +1,24 @@
+{
+    "name": "LifeFromZero.UI.Editor",
+    "rootNamespace": "LifeFromZero.UI.Editor",
+    "references": [
+        "UnityEngine.UI",
+        "LifeFromZero.UI",
+        "LifeFromZero.UI.Core",
+        "LifeFromZero.City.Quarter",
+        "LifeFromZero.City.Pause",
+        "LifeFromZero.City.Quarter.UnityAdapter",
+        "LifeFromZero.Jobs.Delivery"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,16 @@
+{
+    "name": "LifeFromZero.UI.Core",
+    "rootNamespace": "LifeFromZero.UI.Core",
+    "references": [
+        "LifeFromZero.City.Quarter"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

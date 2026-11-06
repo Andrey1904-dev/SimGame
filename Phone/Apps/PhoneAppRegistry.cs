@@ -13,7 +13,11 @@ namespace LifeFromZero.Phone.Apps
     /// </summary>
     public interface IPhoneAppRegistry
     {
-        /// <summary>Регистрирует приложение. Пустой ID — InvalidArgument, повтор — DuplicateId.</summary>
+        /// <summary>
+        /// Регистрирует приложение. null — InvalidArgument, повтор ID — DuplicateId.
+        /// Невалидные данные (пустой ID/название) отсекает конструктор <see cref="PhoneApp"/>
+        /// исключением, поэтому до реестра такой объект не доходит.
+        /// </summary>
         PhoneResult Register(PhoneApp app);
 
         /// <summary>Ищет приложение по ID.</summary>

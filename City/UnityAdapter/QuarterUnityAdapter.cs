@@ -31,7 +31,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
     ///   new QuarterUnityAdapter().Build(plan, parentTransform);
     /// или повесить компонент на пустой объект и задать Seed в инспекторе.
     /// </summary>
-    public sealed class QuarterUnityAdapter : MonoBehaviour
+    public sealed class QuarterUnityAdapter : MonoBehaviour, IQuarterPlanSource
     {
         [Header("Генерация")]
         [SerializeField] private int seed = 1904;
@@ -51,11 +51,23 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         public GameObject BuiltRoot => _builtRoot;
 
         /// <summary>
+        /// План последней генерации (ТЗ №042: его читает карта/HUD, чтобы рисовать
+        /// ТОТ ЖЕ район, который стоит в сцене). null, пока квартал не построен.
+        /// </summary>
+        public QuarterPlan Plan => _planSlot.Plan;
+
+        /// <summary>План уже сгенерирован.</summary>
+        public bool HasPlan => _planSlot.HasPlan;
+
+        /// <summary>
         /// Уничтожает построенный квартал и его меши деталей. Материалы кэша
         /// принадлежат адаптеру и освобождаются в OnDestroy, а не здесь.
         /// </summary>
         public void ClearBuilt()
         {
+            // План снесённого квартала не оставляем: карта читает его через
+            // IQuarterPlanSource и иначе нарисовала бы несуществующий город.
+            _planSlot.Clear();
             if (_builtRoot != null)
             {
                 Destroy(_builtRoot);
@@ -97,13 +109,24 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
         // сцене — используйте два компонента-адаптера.
         private GameObject _builtRoot;
 
+        // План последней генерации: его читает UI (карта/HUD, ТЗ №042).
+        // Логика хранения — в QuarterPlanSlot (проверяется вне Unity); здесь только поле.
+        private readonly QuarterPlanSlot _planSlot = new QuarterPlanSlot();
+
         /// <summary>Создаёт дочерние объекты по плану. Возвращает корень квартала.</summary>
         public GameObject Build(QuarterPlan plan, Transform parent)
         {
             if (plan == null) throw new System.ArgumentNullException(nameof(plan));
 
             // Повторный Build: предыдущий квартал и его меши уничтожаются.
+            // ПОРЯДОК ВАЖЕН: ClearBuilt() сбрасывает план (он описывает снесённый
+            // квартал), поэтому новый план фиксируется ТОЛЬКО ПОСЛЕ очистки.
+            // Раньше присвоение стояло до вызова и тут же затиралось — Plan/HasPlan
+            // всегда оставались пустыми, и карта UI не получала район
+            // (регрессия ТЗ №043, тест QuarterPlanSourceTests).
             ClearBuilt();
+
+            _planSlot.BeginBuild(plan);
 
             _prefabs.Clear();
             foreach (QuarterPrefabOverride o in prefabOverrides)

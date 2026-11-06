@@ -72,10 +72,22 @@ namespace LifeFromZero.Phone.Tests
         {
             var registry = new PhoneAppRegistry();
 
+            // Два уровня контракта, и они разные:
+            //   * PhoneApp — модель, валидирует в конструкторе и БРОСАЕТ
+            //     ArgumentException (см. AppModelValidation);
+            //   * PhoneAppRegistry — сервис, ВОЗВРАЩАЕТ PhoneResultCode.
+            // Прежний тест ждал InvalidArgument от Register, передавая туда
+            // объект, который конструктор создать не даёт: строка падала
+            // ArgumentException ещё до вызова Register (аудит ТЗ №043).
+            // Поэтому проверяем: конструктор не пропускает мусор, а сервис
+            // отклоняет null и принимает валидный объект.
+            MiniTestRunner.IsTrue(
+                Throws<ArgumentException>(() => new PhoneApp("  ", "Пусто", PhoneAppCategory.Other, true, 0)),
+                "конструктор не пропускает пробельный ID");
+
+            var blank = new PhoneApp("id-blank", "Пусто", PhoneAppCategory.Other, true, 0);
             MiniTestRunner.AreEqual(
-                PhoneResultCode.InvalidArgument,
-                registry.Register(new PhoneApp("  ", "Пусто", PhoneAppCategory.Other, true, 0)).Code,
-                "пробельный ID отклонён");
+                PhoneResultCode.Success, registry.Register(blank).Code, "валидное приложение зарегистрировано");
 
             MiniTestRunner.AreEqual(
                 PhoneResultCode.InvalidArgument, registry.Register(null).Code, "null-приложение отклонено");

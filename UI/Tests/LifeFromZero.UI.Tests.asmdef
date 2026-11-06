@@ -1,0 +1,27 @@
+{
+    "name": "LifeFromZero.UI.Tests",
+    "rootNamespace": "LifeFromZero.UI.Tests",
+    "references": [
+        "LifeFromZero.UI",
+        "LifeFromZero.UI.Core",
+        "LifeFromZero.City.Quarter",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "LifeFromZero.Jobs.Delivery"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

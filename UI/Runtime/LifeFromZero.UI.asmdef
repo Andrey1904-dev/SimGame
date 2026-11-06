@@ -1,0 +1,20 @@
+{
+    "name": "LifeFromZero.UI",
+    "rootNamespace": "LifeFromZero.UI.Runtime",
+    "references": [
+        "UnityEngine.UI",
+        "LifeFromZero.UI.Core",
+        "LifeFromZero.City.Quarter",
+        "LifeFromZero.City.Pause",
+        "LifeFromZero.Jobs.Delivery"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
