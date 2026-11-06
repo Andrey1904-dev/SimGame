@@ -132,6 +132,234 @@ namespace LifeFromZero.UI.Editor
             EditorUtility.DisplayDialog("Life From Zero UI — диагностика сцен", report, "OK");
         }
 
+        // ------------------------------------------------------------------ ТЗ №045: починка объектов UI
+
+        /// <summary>
+        /// Починка объектов UI в ОТКРЫТЫХ сценах: Graphic без CanvasRenderer
+        /// (MissingComponentException на «Grid»/«Route» в Play Mode), плюс отчёт о
+        /// Missing Script и о сохранённых в сцене слоях карты.
+        /// </summary>
+        /// <remarks>
+        /// Почему пересоздание компонента, а не AddComponent&lt;CanvasRenderer&gt;: Unity
+        /// не даёт добавлять нативные компоненты скриптом не во всех версиях, а
+        /// удаление Graphic и повторное AddComponent того же типа гарантированно
+        /// выполняет [RequireComponent(typeof(CanvasRenderer))].
+        /// </remarks>
+        [MenuItem("Tools/Life From Zero/UI/Repair UI objects in open scenes", false, 43)]
+        public static void RepairOpenScenesFromMenu()
+        {
+            var report = new StringBuilder();
+            int repaired = 0;
+            int problems = 0;
+
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                Scene scene = SceneManager.GetSceneAt(i);
+                if (!scene.isLoaded) continue;
+
+                report.AppendLine("## Сцена `" + (string.IsNullOrEmpty(scene.path) ? scene.name : scene.path) + "`");
+                int graphicProblems;
+                repaired += RepairGraphicRenderers(scene, report, true, out graphicProblems);
+                problems += graphicProblems;
+                problems += ReportMissingScripts(scene, report);
+                problems += ReportStaleMapLayers(scene, report);
+            }
+
+            report.AppendLine();
+            report.AppendLine("Исправлено объектов: " + repaired + "; осталось проблем: " + problems + ".");
+            if (repaired > 0)
+                report.AppendLine("Сцены помечены изменёнными — сохраните их (Ctrl+S), автоматически не сохраняем.");
+
+            Debug.Log(LogTag + " Починка UI-объектов:\n" + report);
+            EditorUtility.DisplayDialog("Life From Zero UI — починка объектов", report.ToString(), "OK");
+        }
+
+        /// <summary>
+        /// Пакетная починка в сценах Build Settings (с резервной копией каждой сцены).
+        /// Запускается ТОЛЬКО с явным аргументом:
+        /// Unity -batchmode -quit -executeMethod LifeFromZero.UI.Editor.UiInstaller.RepairBatch -lfzUiRepair
+        /// </summary>
+        public static void RepairBatch()
+        {
+            if (!HasArgument("-lfzUiRepair"))
+            {
+                Debug.Log(LogTag + " RepairBatch без -lfzUiRepair ничего не делает: " +
+                                   "нужен явный флаг, чтобы случайно не изменить сцены.");
+                return;
+            }
+
+            var report = new StringBuilder();
+            EditorBuildSettingsScene[] scenes = EditorBuildSettings.scenes;
+            if (scenes == null || scenes.Length == 0)
+            {
+                Debug.LogWarning(LogTag + " Build Settings пуст — нечего чинить.");
+                return;
+            }
+
+            for (int i = 0; i < scenes.Length; i++)
+            {
+                string path = scenes[i].path;
+                if (!scenes[i].enabled || string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
+
+                Scene scene;
+                try
+                {
+                    scene = EditorSceneManager.OpenScene(path, OpenSceneMode.Additive);
+                }
+                catch (Exception exception)
+                {
+                    report.AppendLine("## `" + path + "` — [FAIL] не открылась: " + exception.Message);
+                    continue;
+                }
+
+                try
+                {
+                    report.AppendLine("## Сцена `" + path + "`");
+                    int graphicProblems;
+                    int repaired = RepairGraphicRenderers(scene, report, true, out graphicProblems);
+                    ReportMissingScripts(scene, report);
+                    ReportStaleMapLayers(scene, report);
+
+                    if (repaired > 0)
+                    {
+                        string backup = BackupScene(path);
+                        if (backup == null)
+                        {
+                            report.AppendLine("- [FAIL] резервная копия не создана — сцена НЕ сохранена.");
+                            continue;
+                        }
+                        if (EditorSceneManager.SaveScene(scene, path))
+                            report.AppendLine("- Сохранено (бэкап: " + backup + ").");
+                        else
+                            report.AppendLine("- [FAIL] не удалось сохранить сцену.");
+                    }
+                }
+                finally
+                {
+                    EditorSceneManager.CloseScene(scene, true);
+                }
+            }
+
+            Debug.Log(LogTag + " Починка сцен:\n" + report);
+            AssetDatabase.Refresh();
+        }
+
+        /// <summary>
+        /// Пересоздаёт графику без CanvasRenderer. Возвращает число исправленных.
+        /// С <paramref name="apply"/> = false только перечисляет проблемы.
+        /// </summary>
+        private static int RepairGraphicRenderers(Scene scene, StringBuilder report, bool apply, out int problems)
+        {
+            int repaired = 0;
+            problems = 0;
+
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                foreach (UnityEngine.UI.Graphic graphic in root.GetComponentsInChildren<UnityEngine.UI.Graphic>(true))
+                {
+                    if (graphic == null) continue;
+
+                    GameObject go = graphic.gameObject;
+                    if (go.GetComponent<CanvasRenderer>() != null) continue;
+
+                    string path = HierarchyPath(go);
+                    Type type = graphic.GetType();
+
+                    if (!apply)
+                    {
+                        problems++;
+                        report.AppendLine("- [FAIL] " + type.Name + " без CanvasRenderer: `" + path +
+                                          "` — uGUI не сможет это нарисовать (и будет сыпать MissingComponentException).");
+                        continue;
+                    }
+
+                    try
+                    {
+                        UnityEngine.Object.DestroyImmediate(graphic);
+                        Component recreated = go.AddComponent(type);
+                        if (recreated != null && go.GetComponent<CanvasRenderer>() != null)
+                        {
+                            report.AppendLine("- [FIXED] " + type.Name + ": добавлен CanvasRenderer (`" + path + "`).");
+                            repaired++;
+                        }
+                        else
+                        {
+                            problems++;
+                            report.AppendLine("- [FAIL] " + type.Name + " пересоздан, но CanvasRenderer так и не появился: `" +
+                                              path + "` — удалите объект и запустите установку UI заново.");
+                        }
+                    }
+                    catch (Exception exception)
+                    {
+                        problems++;
+                        report.AppendLine("- [FAIL] " + type.Name + " (`" + path + "`): " + exception.Message);
+                    }
+                }
+            }
+
+            return repaired;
+        }
+
+        /// <summary>Объекты с Missing Script — только отчёт: удалять чужое автоматически нельзя.</summary>
+        private static int ReportMissingScripts(Scene scene, StringBuilder report)
+        {
+            int found = 0;
+
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                foreach (Transform transform in root.GetComponentsInChildren<Transform>(true))
+                {
+                    if (transform == null) continue;
+                    Component[] components = transform.gameObject.GetComponents<Component>();
+                    for (int i = 0; i < components.Length; i++)
+                    {
+                        if (components[i] != null) continue;
+                        found++;
+                        report.AppendLine("- [FAIL] Missing Script: объект `" + HierarchyPath(transform.gameObject) +
+                                          "`, слот компонента #" + i +
+                                          ". Скрипт удалён или переименован — назначьте нужный компонент вручную " +
+                                          "(автоматически не удаляем: владелец сцены решает сам).");
+                    }
+                }
+            }
+
+            return found;
+        }
+
+        /// <summary>Сохранённые в сцене слои карты: MapScreen создаёт их заново в Awake.</summary>
+        private static int ReportStaleMapLayers(Scene scene, StringBuilder report)
+        {
+            int found = 0;
+
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                foreach (MapCanvasGraphic graphic in root.GetComponentsInChildren<MapCanvasGraphic>(true))
+                {
+                    if (graphic == null) continue;
+                    found++;
+                    report.AppendLine("- [FAIL] В сцене сохранён слой карты `" + HierarchyPath(graphic.gameObject) +
+                                      "` (" + graphic.GetType().Name + "). MapScreen создаёт «Grid»/«Route» сам в Awake — " +
+                                      "сохранённый объект лишний, его нужно удалить вручную.");
+                }
+            }
+
+            return found;
+        }
+
+        private static string HierarchyPath(GameObject go)
+        {
+            if (go == null) return "<null>";
+            string path = go.name;
+            Transform parent = go.transform.parent;
+            int guard = 0;
+            while (parent != null && guard++ < 32)
+            {
+                path = parent.name + "/" + path;
+                parent = parent.parent;
+            }
+            return path;
+        }
+
         /// <summary>
         /// Пакетная проверка компиляции и связей сцен (Apartment67, District750, Build Settings)
         /// БЕЗ сохранения и перезаписи ассетов. Вызывается через Unity -batchmode -executeMethod.
@@ -484,6 +712,18 @@ namespace LifeFromZero.UI.Editor
                 so.ApplyModifiedPropertiesWithoutUndo();
             }
 
+            // ТЗ №045: поле phoneSystem в UiBootstrap было мёртвым — интегратор назначал
+            // телефонный мост, но бутстрап его не читал, и телефон открывался пустым.
+            // Теперь установщик сам кладёт найденный IPhoneDataSource (PhoneFacadeUiBridge).
+            if (bootstrap != null)
+            {
+                MonoBehaviour phoneSource = FindInterfaceBehaviourExcept<IPhoneDataSource>(scene,
+                    typeof(DeliveryServiceBridge));
+                var soPhone = new SerializedObject(bootstrap);
+                SetIfNull(soPhone, "phoneSystem", phoneSource);
+                soPhone.ApplyModifiedPropertiesWithoutUndo();
+            }
+
             if (deliveryBridge != null)
             {
                 var so = new SerializedObject(deliveryBridge);
@@ -495,6 +735,22 @@ namespace LifeFromZero.UI.Editor
                 SetIfNull(so, "payoutAdapter", payoutAdapter);
                 so.ApplyModifiedPropertiesWithoutUndo();
             }
+        }
+
+        private static MonoBehaviour FindInterfaceBehaviourExcept<TInterface>(Scene scene, Type excluded)
+            where TInterface : class
+        {
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                foreach (MonoBehaviour mb in root.GetComponentsInChildren<MonoBehaviour>(true))
+                {
+                    if (mb == null) continue;
+                    if (!(mb is TInterface)) continue;
+                    if (excluded != null && excluded.IsInstanceOfType(mb)) continue;
+                    return mb;
+                }
+            }
+            return null;
         }
 
         private static MonoBehaviour FindInterfaceBehaviour<TInterface>(Scene scene) where TInterface : class
@@ -588,8 +844,33 @@ namespace LifeFromZero.UI.Editor
                                   (pauseInt != null ? pauseInt.GetType().Name : "нет"));
                     sb.AppendLine("- PauseDataSource: " + (pauseData != null ? pauseData.GetType().Name : "нет (покажет честное «Нет данных»)"));
                     sb.AppendLine("- IQuarterPlanSource (район): " + (district != null ? district.GetType().Name : "нет"));
+                    var phoneSource = FindInterfaceBehaviourExcept<IPhoneDataSource>(scene, typeof(DeliveryServiceBridge));
+                    sb.AppendLine("- IPhoneDataSource (телефон): " +
+                                  (phoneSource != null
+                                      ? phoneSource.GetType().Name
+                                      : "нет (телефон покажет неактивные плитки — подключите PhoneFacadeUiBridge)"));
                     sb.AppendLine("- Переходы сцен: District750Link=" + (districtLink != null ? "есть" : "нет") +
                                   ", PlayerHomeAnchor=" + (homeAnchor != null ? "есть" : "нет"));
+
+                    // ТЗ №045: дефекты, которые в Play Mode выглядят как «M не открывает карту»
+                    // (Graphic без CanvasRenderer) и как Missing Script в консоли.
+                    var uiIssues = new StringBuilder();
+                    int rendererProblems;
+                    RepairGraphicRenderers(scene, uiIssues, false, out rendererProblems);
+                    int missingScripts = ReportMissingScripts(scene, uiIssues);
+                    int staleMapLayers = ReportStaleMapLayers(scene, uiIssues);
+
+                    if (uiIssues.Length > 0)
+                    {
+                        sb.Append(uiIssues.ToString());
+                    }
+
+                    sb.AppendLine("- Слои карты (Graphic/CanvasRenderer): " +
+                                  (rendererProblems == 0 ? "проблем нет" : "ПРОБЛЕМ " + rendererProblems));
+                    sb.AppendLine("- Missing Script: " + (missingScripts == 0 ? "нет" : "ПРОБЛЕМ " + missingScripts));
+                    sb.AppendLine("- Сохранённые слои карты (должны создаваться в рантайме): " +
+                                  (staleMapLayers == 0 ? "нет" : "ПРОБЛЕМ " + staleMapLayers));
+                    issueCount += rendererProblems + missingScripts + staleMapLayers;
                 }
                 finally
                 {

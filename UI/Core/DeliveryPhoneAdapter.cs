@@ -202,5 +202,25 @@ namespace LifeFromZero.UI.Core
             new PhoneAppTile(PhoneAppIds.Gallery, "Галерея", 0, false, "gallery"),
             new PhoneAppTile(PhoneAppIds.Settings, "Настройки", 0, true, "settings"),
         };
+
+        /// <summary>
+        /// Плитки-заглушки: те же приложения, но НИ ОДНО не активно. Показываются,
+        /// только когда источник данных телефона не подключён (ТЗ №045): пустой
+        /// экран выглядит как поломка, а включённые «как будто работают» плитки —
+        /// обман игрока.
+        /// </summary>
+        public static IReadOnlyList<PhoneAppTile> BuildPlaceholder() => new[]
+        {
+            new PhoneAppTile(PhoneAppIds.Messages, "Сообщения", 0, false, "messages"),
+            new PhoneAppTile(PhoneAppIds.Calls, "Звонки", 0, false, "calls"),
+            new PhoneAppTile(PhoneAppIds.Contacts, "Контакты", 0, false, "contacts"),
+            new PhoneAppTile(PhoneAppIds.Bank, "Банк", 0, false, "bank"),
+            new PhoneAppTile(PhoneAppIds.Orders, "Заказы", 0, false, "orders"),
+            new PhoneAppTile(PhoneAppIds.Tasks, "Задания", 0, false, "tasks"),
+            new PhoneAppTile(PhoneAppIds.Ads, "Объявления", 0, false, "ads"),
+            new PhoneAppTile(PhoneAppIds.Education, "Учёба", 0, false, "education"),
+            new PhoneAppTile(PhoneAppIds.Gallery, "Галерея", 0, false, "gallery"),
+            new PhoneAppTile(PhoneAppIds.Settings, "Настройки", 0, false, "settings"),
+        };
     }
 }

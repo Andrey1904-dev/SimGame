@@ -112,6 +112,21 @@ namespace LifeFromZero.UI.Runtime
             return configurable == null || configurable.IsConfigured;
         }
 
+        /// <summary>
+        /// Передать телефонный мост (например PhoneFacadeUiBridge), чтобы телефон получал
+        /// и заказы доставки, и сообщения/контакты/задачи из PhoneFacade.
+        /// </summary>
+        /// <remarks>
+        /// ТЗ №045: UiBootstrap выбирает источником данных телефона этот мост (он умеет
+        /// объединять источники), но раньше внешний мост можно было задать только в
+        /// инспекторе — при автоподключении разделы телефона терялись.
+        /// </remarks>
+        public void UseExternalPhoneDataSource(IPhoneDataSource source)
+        {
+            if (ReferenceEquals(source, this)) return;
+            externalPhoneDataSource = source as MonoBehaviour;
+        }
+
         /// <summary>Сбросить закэшированные ссылки сцены перед повторным разрешением.</summary>
         public void ResetSceneCache()
         {

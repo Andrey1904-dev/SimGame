@@ -54,6 +54,11 @@ namespace LifeFromZero.UI.Runtime
         private float _lastDragTime;
         private readonly List<GameObject> _markerObjects = new List<GameObject>();
 
+        // Перерисовка только по изменению данных (ТЗ №045): без этого uGUI перестраивал
+        // меш на каждое обращение к Refresh(), а слой без CanvasRenderer падал столько же раз.
+        private readonly MapRedrawGate _redrawGate = new MapRedrawGate();
+        private bool _missingLayerLogged;
+
         /// <summary>Геометрия района (дороги, точки, сетка). Может быть null — тогда только сетка.</summary>
         public IMapGeometrySource Geometry { get; set; }
 
@@ -125,8 +130,11 @@ namespace LifeFromZero.UI.Runtime
             viewportBackground.raycastTarget = true;
             _viewport.gameObject.AddComponent<RectMask2D>();
 
-            RectTransform gridLayer = UiBuilder.Rect("Grid", _viewport, 0f, 0f, 1f, 1f);
-            _graphic = gridLayer.gameObject.AddComponent<MapCanvasGraphic>();
+            // Слои карты создаются ТОЛЬКО через UiBuilder.GraphicLayer: он гарантирует
+            // CanvasRenderer (без него uGUI сыпал MissingComponentException) и сам
+            // отключает слой с одним понятным сообщением, если рендерер не появился.
+            _graphic = UiBuilder.GraphicLayer<MapCanvasGraphic>("Grid", _viewport, 0f, 0f, 1f, 1f,
+                out _);
             _graphic.Project = WorldToUnit;
             _graphic.GridColor = new Color(1f, 1f, 1f, 0.06f);
             _graphic.RoadColor = new Color(0.60f, 0.65f, 0.72f, 0.95f);
@@ -136,8 +144,8 @@ namespace LifeFromZero.UI.Runtime
             _graphic.PixelsPerMeterProvider = () => PixelsPerMeter();
             _graphic.raycastTarget = false;
 
-            RectTransform routeLayer = UiBuilder.Rect("Route", _viewport, 0f, 0f, 1f, 1f);
-            _routeGraphic = routeLayer.gameObject.AddComponent<MapCanvasGraphic>();
+            _routeGraphic = UiBuilder.GraphicLayer<MapCanvasGraphic>("Route", _viewport, 0f, 0f, 1f, 1f,
+                out _);
             _routeGraphic.Project = WorldToUnit;
             _routeGraphic.GridStepMeters = 0f;
             _routeGraphic.RouteColor = UiTheme.MapRoute;
@@ -202,14 +210,37 @@ namespace LifeFromZero.UI.Runtime
             if (visible)
             {
                 ApplyTransform();
-                Refresh();
+                Refresh(true);
             }
         }
 
-        /// <summary>Полная перерисовка: маршрут, метки, информация.</summary>
-        public void Refresh()
+        /// <summary>Перерисовать, если данные изменились (см. <see cref="MapRedrawGate"/>).</summary>
+        public void Refresh() => Refresh(false);
+
+        /// <summary>
+        /// Полная перерисовка: маршрут, метки, информация. <paramref name="force"/> = true
+        /// перерисовывает даже при неизменных данных (открытие карты, смена района).
+        /// </summary>
+        public void Refresh(bool force)
         {
             if (!IsVisible) return;
+
+            if (_graphic == null || _routeGraphic == null || _zoomLabel == null)
+            {
+                // Слой карты не создался (например, объект «Grid»/«Route» остался в сцене
+                // без CanvasRenderer). Сообщаем ОДИН раз и не спамим каждый кадр.
+                if (!_missingLayerLogged)
+                {
+                    _missingLayerLogged = true;
+                    Debug.LogError("[MapScreen] Слои карты не созданы — карта не будет нарисована. " +
+                                   "Проверьте «Grid»/«Route»: Tools → Life From Zero → UI → " +
+                                   "Verify Scenes & Adapters.");
+                }
+                return;
+            }
+
+            if (!force && !_redrawGate.ShouldRedraw(BuildFrameKey())) return;
+
             _graphic.Source = Geometry;
             _graphic.GridStepMeters = gridStepMeters;
             _graphic.WorldBounds = new Rect(0f, 0f, _worldSize.x, _worldSize.y);
@@ -222,8 +253,32 @@ namespace LifeFromZero.UI.Runtime
             _zoomLabel.text = _zoom.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "×";
         }
 
+        /// <summary>Что видно на карте сейчас — вход для <see cref="MapRedrawGate"/>.</summary>
+        private MapFrameKey BuildFrameKey()
+        {
+            Vector2 player;
+            float heading;
+            bool hasPlayer = TryPlayer(out player, out heading);
+            RoutePath route = _navigation != null ? _navigation.ActiveRoute : null;
+
+            return new MapFrameKey(
+                IsVisible,
+                _zoom,
+                _center.x,
+                _center.y,
+                _worldSize.x,
+                _worldSize.y,
+                gridStepMeters,
+                Geometry == null ? 0 : Geometry.GetHashCode(),
+                MapRedrawGate.RouteSignature(route),
+                hasPlayer,
+                hasPlayer ? MapRedrawGate.PlayerCell(player.x) : 0f,
+                hasPlayer ? MapRedrawGate.PlayerCell(player.y) : 0f);
+        }
+
         private void BuildRoute(RoutePath route)
         {
+            if (_routeGraphic == null) return;
             if (route == null)
             {
                 _routeGraphic.RoutePoints = null;

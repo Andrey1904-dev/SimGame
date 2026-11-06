@@ -113,11 +113,12 @@ namespace UnityEngine
         public static GameObject FindWithTag(string tag) => null;
         public static GameObject FindGameObjectWithTag(string tag) => null;
         public Transform transform { get; } = new Transform();
-        public T AddComponent<T>() where T : Component, new() => new T();
+        public T AddComponent<T>() where T : Component => (T)Activator.CreateInstance(typeof(T));
         public Component AddComponent(Type t) => (Component)Activator.CreateInstance(t);
         public T GetComponent<T>() => default(T);
         public T GetComponentInChildren<T>(bool includeInactive = false) => default(T);
         public T[] GetComponentsInChildren<T>(bool includeInactive = false) => new T[0];
+        public T[] GetComponents<T>() => new T[0];
         public Component GetComponentInChildren(Type type, bool includeInactive = false) => null;
         public T GetComponentInParent<T>() => default(T);
         public bool activeInHierarchy => true;
@@ -217,6 +218,14 @@ namespace UnityEngine
     public static class Resources {
         public static T GetBuiltinResource<T>(string path) where T : Object => null;
     }
+    /// <summary>
+    /// Заглушка нативного CanvasRenderer: uGUI-графика без него не рисуется
+    /// (регрессия ТЗ №045 — MissingComponentException на «Grid»/«Route»).
+    /// </summary>
+    public class CanvasRenderer : Component
+    {
+        public bool cull { get; set; }
+    }
     public class Canvas : Behaviour {
         public RenderMode renderMode { get; set; }
         public int sortingOrder { get; set; }
@@ -247,6 +256,8 @@ namespace UnityEngine
         public static float deltaTime => 0.016f;
         public static float unscaledDeltaTime => 0.016f;
         public static float time => 0f;
+        public static float unscaledTime => 0f;
+        public static float realtimeSinceStartup => 0f;
     }
     public static class Cursor {
         public static bool visible { get; set; } = true;
@@ -273,7 +284,8 @@ namespace UnityEngine
     [AttributeUsage(AttributeTargets.Field)] public sealed class HeaderAttribute : Attribute { public HeaderAttribute(string h) {} }
     [AttributeUsage(AttributeTargets.Field)] public sealed class TooltipAttribute : Attribute { public TooltipAttribute(string h) {} }
     [AttributeUsage(AttributeTargets.Field)] public sealed class RangeAttribute : Attribute { public RangeAttribute(float a, float b) {} }
-    [AttributeUsage(AttributeTargets.Class)] public sealed class RequireComponentAttribute : Attribute { public RequireComponentAttribute(Type t) {} }
+    // В Unity атрибут допускает несколько применений (RequireComponent(typeof(A)), RequireComponent(typeof(B))).
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)] public sealed class RequireComponentAttribute : Attribute { public RequireComponentAttribute(Type t) {} }
     [AttributeUsage(AttributeTargets.Class)] public sealed class DisallowMultipleComponentAttribute : Attribute { }
     public class WaitForEndOfFrame { }
     public class WaitForSeconds { public WaitForSeconds(float s) {} }
@@ -287,6 +299,10 @@ namespace UnityEngine.UI
 {
     using UnityEngine;
     public class Graphic : Behaviour {
+        // UIBehaviour объявляет Awake/OnEnable виртуальными — производные Graphic-слои их переопределяют.
+        protected virtual void Awake() {}
+        protected virtual void OnEnable() {}
+        protected virtual void OnDisable() {}
         public Color color { get; set; }
         public bool raycastTarget { get; set; }
         public RectTransform rectTransform => new RectTransform();

@@ -329,3 +329,28 @@ Unity -batchmode -projectPath "$PWD" -runTests -testPlatform EditMode \
   `LifeFromZero.UI.Editor` (только Editor). UI **не** ссылается на
   `City.Quarter.UnityAdapter`: это дало бы цикл сборок. План читается через
   `IQuarterPlanSource` из `City.Quarter`.
+
+---
+
+## 6. ТЗ №045 — что изменилось после реального Play Mode
+
+Отчёт: `UI/REPORT_045_UI_FIXES.md`. Команды применения в локальном проекте: `CODEX_FIX_UI.md`.
+
+Коротко, чтобы не искать по файлам:
+
+* **Телефон.** `UiBootstrap` теперь читает поле `phoneSystem` и сам находит компонент
+  с `IPhoneDataSource` в сцене (`PhoneFacadeUiBridge`, `DeliveryServiceBridge`, снимок).
+  Порядок выбора — `UI/Core/UiWiringDecisions.cs` (`PhoneSourceResolver`), он покрыт тестами.
+  Если источника нет, рабочий стол показывает **неактивные** плитки и текст
+  «Телефон не подключён к данным игры», а не пустой экран и не совет про
+  `PhoneAppRegistry.CreateDefault()` (этот совет был неверным: плитки приходят из `PhoneSnapshot.Apps`).
+* **Карта.** Слои `Grid`/`Route` создаются только через `UiBuilder.GraphicLayer`
+  (явная проверка `CanvasRenderer`), `MapCanvasGraphic` объявляет
+  `[RequireComponent(typeof(CanvasRenderer))]` и при его отсутствии отключается с одним
+  сообщением. Перерисовка — только при изменении видимых данных (`UI/Core/MapRedrawGate.cs`).
+* **Диагностика сцены.** `Tools → Life From Zero → UI → Verify Scenes & Adapters` теперь
+  показывает Graphic без `CanvasRenderer`, Missing Script и сохранённые в сцене слои карты;
+  `Tools → Life From Zero → UI → Repair UI objects in open scenes` пересоздаёт такие компоненты.
+  Пакетно: `UiInstaller.RepairBatch` (только с `-lfzUiRepair`, с бэкапом сцен).
+* **Район.** «План района не подключён» разделено на три состояния: сцена без района (норма
+  для квартиры №67), ожидание генерации (District750) и готово; добавлен ограниченный повтор.

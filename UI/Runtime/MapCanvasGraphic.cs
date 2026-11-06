@@ -28,9 +28,52 @@ namespace LifeFromZero.UI.Runtime
         void GetPoints(Action<Vector2, float> point);
     }
 
-    /// <summary>Слой карты, рисуемый одним мешем.</summary>
+    /// <summary>
+    /// Слой карты, рисуемый одним мешем. Требует CanvasRenderer явно (ТЗ №045):
+    /// без него каждый Rebuild канваса давал MissingComponentException, и в консоли
+    /// появлялись сотни одинаковых ошибок «Grid»/«Route».
+    /// </summary>
+    [RequireComponent(typeof(CanvasRenderer))]
+    [RequireComponent(typeof(RectTransform))]
     public sealed class MapCanvasGraphic : MaskableGraphic
     {
+        private CanvasRenderer _canvasRenderer;
+        private bool _rendererChecked;
+
+        /// <summary>У слоя есть CanvasRenderer и его можно рисовать.</summary>
+        public bool HasCanvasRenderer
+        {
+            get
+            {
+                EnsureRenderer();
+                return _canvasRenderer != null;
+            }
+        }
+
+        /// <summary>
+        /// Проверка рендерера ровно один раз. Если его нет — слой отключается,
+        /// чтобы uGUI не пытался перестраивать его каждый кадр (источник «сотен»
+        /// исключений в Play Mode).
+        /// </summary>
+        protected override void Awake()
+        {
+            base.Awake();
+            EnsureRenderer();
+            if (_canvasRenderer != null) return;
+
+            Debug.LogError("[MapCanvasGraphic] У объекта «" + name + "» нет CanvasRenderer: " +
+                           "слой карты отключён. Пересоздайте компонент (Tools → Life From Zero → " +
+                           "UI → Verify Scenes & Adapters) — без рендерера uGUI его не нарисует.");
+            enabled = false;
+        }
+
+        private void EnsureRenderer()
+        {
+            if (_rendererChecked) return;
+            _rendererChecked = true;
+            _canvasRenderer = GetComponent<CanvasRenderer>();
+        }
+
         /// <summary>Мировая точка → локальная точка RectTransform.</summary>
         public Func<Vector2, Vector2> Project;
 
@@ -124,8 +167,16 @@ namespace LifeFromZero.UI.Runtime
             return PixelsPerMeterProvider != null ? PixelsPerMeterProvider() : 1f;
         }
 
-        /// <summary>Перерисовать (после смены зума/маршрута).</summary>
-        public void Redraw() => SetVerticesDirty();
+        /// <summary>
+        /// Перерисовать (после смены зума/маршрута). Без CanvasRenderer перерисовка
+        /// не запрашивается: иначе uGUI падает на каждом обновлении канваса.
+        /// </summary>
+        public void Redraw()
+        {
+            EnsureRenderer();
+            if (_canvasRenderer == null || !isActiveAndEnabled) return;
+            SetVerticesDirty();
+        }
 
         private void AddLine(VertexHelper vh, Vector2 worldA, Vector2 worldB, float widthPixels, Color color,
             float halfW, float halfH)
