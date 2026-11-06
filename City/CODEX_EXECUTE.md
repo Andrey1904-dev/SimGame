@@ -20,14 +20,13 @@
 | Параметр | Значение |
 |---|---|
 | Репозиторий | `https://github.com/Andrey1904-dev/SimGame` |
-| PR с подготовкой | `https://github.com/Andrey1904-dev/SimGame/pull/13` |
-| Ветка с подготовкой | `arena/672047f2-simgame`; после слияния PR #13 — `main` |
+| Ветка сквозной интеграции (`City` + `Pause` + `UI` + домены) | `arena/c02a16e9-simgame` (после слияния PR — `main`; точка отката: тег `backup-before-integration` / `f8334ba`) |
 | Локальный Unity-проект | `/Users/homepc/Projects/LifeFromZero` |
 | Unity / URP | 6000.3.27f1 / 17.3.0 |
 | Машина | macOS, Apple Silicon M4, 16 ГБ RAM |
 | Город | District750, 750×750 м, `seed = 1904`, `layoutId = district750` |
-| Меню паузы | `Esc`, дизайн по `Pause Menu.PNG` (уже в проекте) |
-| Телефон | английская `P`. Никаких `I`, `M`, `J` |
+| Меню паузы | `Esc`, дизайн по `Pause Menu.PNG` (координировано между `City.Pause` и `LifeFromZero.UI`) |
+| Телефон и карта | телефон — английская `P`, карта района — английская `M` (при подключённом `LifeFromZero.UI`; см. `UI/CODEX_EXECUTE.md` §0) |
 
 Что уже готово в репозитории: исходники модулей (`City/Quarter`, `City/UnityAdapter`,
 `City/Tests`, `City/PauseMenu`, `City/PauseInputSystem`, `City/PauseTests`), установщик

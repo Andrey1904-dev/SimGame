@@ -43,10 +43,13 @@ namespace LifeFromZero.UI.Runtime
         [SerializeField] private MonoBehaviour locationProvider;
 
         [Header("Данные для экрана телефона")]
-        [Tooltip("Кошелёк/банк для раздела «Банк». Необязательно.")]
+        [Tooltip("Кошелёк/банк и часы для раздела «Банк» и шапки телефона. Пусто — ищется UiSnapshotSource.")]
         [SerializeField] private MonoBehaviour walletSource;
 
-        [Tooltip("План района: нужен для координат точек доставки на карте.")]
+        [Tooltip("Дополнительный источник данных телефона (сообщения, звонки, задачи из PhoneFacade). Необязательно.")]
+        [SerializeField] private MonoBehaviour externalPhoneDataSource;
+
+        [Tooltip("План района: нужен для координат точек доставки на карте. Пусто — берётся у UiBootstrap/сцены.")]
         [SerializeField] private MonoBehaviour districtSource;
 
         private IDeliveryService _service;
@@ -55,20 +58,35 @@ namespace LifeFromZero.UI.Runtime
         private ILocationProvider _location;
 
         /// <summary>Сервис доставки подключён и готов отдавать данные.</summary>
-        public bool Connected => _service != null;
+        public bool Connected
+        {
+            get
+            {
+                Resolve();
+                return IsAlive(_service);
+            }
+        }
 
-        /// <summary>Можно ли выполнять команды (нужны все три части игры).</summary>
-        public bool CommandsReady => _service != null && _clock != null && _payout != null && _location != null;
+        /// <summary>Можно ли выполнять все команды доставки (нужны все три части игры).</summary>
+        public bool CommandsReady
+        {
+            get
+            {
+                Resolve();
+                return IsAlive(_service) && IsAlive(_clock) && IsAlive(_payout) && IsAlive(_location);
+            }
+        }
 
-        /// <summary>Причина, по которой команды недоступны (null — всё в порядке).</summary>
+        /// <summary>Причина, по которой полный цикл команд недоступен (null — всё в порядке).</summary>
         public string CommandBlockReason
         {
             get
             {
-                if (_service == null) return "Система доставки не подключена.";
-                if (_clock == null) return "Игровое время не подключено.";
-                if (_payout == null) return "Кошелёк не подключён.";
-                if (_location == null) return "Местоположение игрока не подключено.";
+                Resolve();
+                if (!IsAlive(_service)) return "Система доставки не подключена.";
+                if (!IsAlive(_clock)) return "Игровое время не подключено.";
+                if (!IsAlive(_payout)) return "Кошелёк не подключён.";
+                if (!IsAlive(_location)) return "Местоположение игрока не подключено.";
                 return null;
             }
         }
@@ -85,28 +103,95 @@ namespace LifeFromZero.UI.Runtime
 
         private void Awake() => Resolve();
 
+        private static bool IsAlive(object target)
+        {
+            if (target == null) return false;
+            var unityObj = target as UnityEngine.Object;
+            if ((object)unityObj != null && unityObj == null) return false;
+            var configurable = target as IConfiguredDeliveryAdapter;
+            return configurable == null || configurable.IsConfigured;
+        }
+
+        /// <summary>Сбросить закэшированные ссылки сцены перед повторным разрешением.</summary>
+        public void ResetSceneCache()
+        {
+            if (!IsAlive(_service)) _service = null;
+            if (!IsAlive(_clock)) _clock = null;
+            if (!IsAlive(_payout)) _payout = null;
+            if (!IsAlive(_location)) _location = null;
+            Resolve();
+        }
+
         /// <summary>Найти части игры в сцене, если не назначены в инспекторе.</summary>
         public void Resolve()
         {
+            if (!IsAlive(_service)) _service = null;
+            if (!IsAlive(_clock)) _clock = null;
+            if (!IsAlive(_payout)) _payout = null;
+            if (!IsAlive(_location)) _location = null;
+
             if (_service == null && deliveryServiceSource != null)
-                _service = deliveryServiceSource as IDeliveryService;
-            if (_service == null)
             {
-                var holders = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-                for (int i = 0; i < holders.Length; i++)
+                var assignedDistrictHost = deliveryServiceSource as DistrictDeliveryServiceHost;
+                if (assignedDistrictHost != null)
                 {
-                    // DeliveryService — обычный класс, а не компонент: ищем компонент,
-                    // который его ОТДАЁТ (наследник DeliveryServiceHost).
-                    var host = holders[i] as DeliveryServiceHost;
-                    if (host == null) continue;
-                    _service = host.Service;
-                    if (_service != null) break;
+                    _service = assignedDistrictHost.HasConfiguredService ? assignedDistrictHost.Service : null;
+                }
+                else
+                {
+                    var assignedHost = deliveryServiceSource as DeliveryServiceHost;
+                    _service = assignedHost != null ? assignedHost.Service : (deliveryServiceSource as IDeliveryService);
                 }
             }
 
-            if (_clock == null) _clock = clockAdapter as IGameClockAdapter;
-            if (_payout == null) _payout = payoutAdapter as IPayoutAdapter;
-            if (_location == null) _location = locationProvider as ILocationProvider;
+            MonoBehaviour[] holders = null;
+            if (_service == null || _clock == null || _payout == null || _location == null ||
+                walletSource == null || districtSource == null)
+            {
+                holders = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+            }
+
+            if (_service == null && holders != null)
+            {
+                for (int i = 0; i < holders.Length; i++)
+                {
+                    MonoBehaviour candidate = holders[i];
+                    if (candidate == null || ReferenceEquals(candidate, this)) continue;
+                    var districtHost = candidate as DistrictDeliveryServiceHost;
+                    if (districtHost != null)
+                    {
+                        if (districtHost.HasConfiguredService && districtHost.Service != null)
+                        {
+                            _service = districtHost.Service;
+                            break;
+                        }
+                        continue;
+                    }
+                    var host = candidate as DeliveryServiceHost;
+                    if (host != null && host.Service != null) { _service = host.Service; break; }
+                    var direct = candidate as IDeliveryService;
+                    if (direct != null) { _service = direct; break; }
+                }
+            }
+
+            if (_clock == null && clockAdapter != null) _clock = clockAdapter as IGameClockAdapter;
+            if (_payout == null && payoutAdapter != null) _payout = payoutAdapter as IPayoutAdapter;
+            if (_location == null && locationProvider != null) _location = locationProvider as ILocationProvider;
+
+            if (holders != null)
+            {
+                for (int i = 0; i < holders.Length; i++)
+                {
+                    MonoBehaviour candidate = holders[i];
+                    if (candidate == null || ReferenceEquals(candidate, this)) continue;
+                    if (_clock == null && candidate is IGameClockAdapter c) _clock = c;
+                    if (_payout == null && candidate is IPayoutAdapter p) _payout = p;
+                    if (_location == null && candidate is ILocationProvider l) _location = l;
+                    if (walletSource == null && candidate is UiSnapshotSource) walletSource = candidate;
+                    if (districtSource == null && candidate is LifeFromZero.City.Quarter.IQuarterPlanSource)
+                        districtSource = candidate;
+                }
+            }
         }
 
         // ------------------------------------------------------------------ IPhoneDataSource
@@ -114,7 +199,28 @@ namespace LifeFromZero.UI.Runtime
         public PhoneSnapshot ReadPhone()
         {
             Resolve();
-            var snapshot = new PhoneSnapshot { Apps = PhoneAppCatalog.Build(_service != null) };
+
+            PhoneSnapshot snapshot = null;
+            if (externalPhoneDataSource != null && !ReferenceEquals(externalPhoneDataSource, this))
+            {
+                var ext = externalPhoneDataSource as IPhoneDataSource;
+                if (ext != null) snapshot = ext.ReadPhone();
+            }
+
+            if (snapshot == null)
+            {
+                snapshot = new PhoneSnapshot { Apps = PhoneAppCatalog.Build(_service != null) };
+            }
+
+            if (walletSource is UiSnapshotSource uiSource)
+            {
+                var uiSnap = new UiSnapshot();
+                uiSource.ReadInto(uiSnap);
+                if (string.IsNullOrEmpty(snapshot.LockTime) || snapshot.LockTime == UiFormat.Dash)
+                    snapshot.LockTime = uiSnap.Clock.TimeLabel;
+                if (string.IsNullOrEmpty(snapshot.LockDate) || snapshot.LockDate == UiFormat.Dash)
+                    snapshot.LockDate = uiSnap.Clock.DayLabel;
+            }
 
             if (_service == null)
             {
@@ -122,13 +228,12 @@ namespace LifeFromZero.UI.Runtime
                 {
                     UnavailableReason = "Система доставки не подключена — заказов нет.",
                 };
+                if (snapshot.Bank == null) snapshot.Bank = BuildBank(snapshot.Orders);
                 return snapshot;
             }
 
             snapshot.Orders = BuildOrders();
             snapshot.Bank = BuildBank(snapshot.Orders);
-            snapshot.UnreadMessages = 0;
-            snapshot.UnreadNotifications = 0;
             return snapshot;
         }
 
@@ -175,20 +280,46 @@ namespace LifeFromZero.UI.Runtime
 
         private DeliveryPhoneOrder ToPhoneOrder(DeliveryOrder order, DeliveryOrderState state)
         {
+            // Пока груз ещё не забран в ПВЗ (Accepted), курьеру сначала нужен маршрут
+            // к точке получения (PickupPoint), а после PickUp — к точке вручения (DropOffPoint).
+            string routePointId = state == DeliveryOrderState.Accepted
+                ? order.PickupPoint.Id
+                : order.DropOffPoint.Id;
+            string routeTitle = state == DeliveryOrderState.Accepted
+                ? "Забрать: " + order.PickupPoint.DisplayName + " → " + order.DropOffPoint.DisplayName
+                : order.DropOffPoint.DisplayName;
+
             MapPoint? position = null;
             MapPoint point;
-            if (TryGetDeliveryPosition(order.DropOffPoint.Id, out point)) position = point;
+            if (TryGetDeliveryPosition(routePointId, out point))
+                position = point;
+            else if (state == DeliveryOrderState.Accepted && TryGetDeliveryPosition(order.DropOffPoint.Id, out point))
+                position = point;
+
+            string deadlineLabel = string.Empty;
+            if (order.DeadlineGameMinutes > 0 && IsAlive(_clock))
+            {
+                try
+                {
+                    long remaining = order.DeadlineGameMinutes - (long)Math.Floor(_clock.NowMinutes);
+                    deadlineLabel = remaining >= 0 ? ("осталось " + remaining + " мин") : "просрочен";
+                }
+                catch
+                {
+                    deadlineLabel = string.Empty;
+                }
+            }
 
             long? payment = order.PaymentRubles > 0 ? order.PaymentRubles : (long?)null;
             return new DeliveryPhoneOrder(
                 order.Id,
                 order.CargoTitle,
-                order.DropOffPoint.Id,
-                order.DropOffPoint.DisplayName,
+                routePointId,
+                routeTitle,
                 payment,
                 ToStage(state),
                 position,
-                string.Empty);
+                deadlineLabel);
         }
 
         private DeliveryOrderState StateOf(string orderId)
@@ -209,6 +340,13 @@ namespace LifeFromZero.UI.Runtime
             LifeFromZero.City.Quarter.QuarterPlan plan = null;
             var source = districtSource as LifeFromZero.City.Quarter.IQuarterPlanSource;
             if (source != null) plan = source.Plan;
+            if (plan == null && UiBootstrap.Instance != null) plan = UiBootstrap.Instance.CurrentDistrictPlan;
+            if (plan == null)
+            {
+                Resolve();
+                source = districtSource as LifeFromZero.City.Quarter.IQuarterPlanSource;
+                if (source != null) plan = source.Plan;
+            }
             if (plan == null) return false;
 
             return QuarterPlanAdapter.TryGetDeliveryPosition(plan, deliveryPointId, out position);
@@ -239,8 +377,28 @@ namespace LifeFromZero.UI.Runtime
             if (DeliveryPhoneRows.TryParse(action, out verb, out orderId))
                 return TryRun(verb, orderId, out message);
 
+            if (externalPhoneDataSource != null && !ReferenceEquals(externalPhoneDataSource, this))
+            {
+                var ext = externalPhoneDataSource as IPhoneDataSource;
+                if (ext != null) return ext.TryRun(action, out message);
+            }
+
             message = "Раздел «" + action + "» пока не подключён к игре.";
             return false;
+        }
+
+        private string CheckBlockReasonForVerb(string verb)
+        {
+            if (!IsAlive(_service)) return "Система доставки не подключена.";
+            if (!IsAlive(_clock)) return "Игровое время не подключено.";
+            if (verb == DeliveryPhoneCommands.PickUp && !IsAlive(_location))
+                return "Местоположение игрока не подключено.";
+            if (verb == DeliveryPhoneCommands.Complete)
+            {
+                if (!IsAlive(_location)) return "Местоположение игрока не подключено.";
+                if (!IsAlive(_payout)) return "Кошелёк не подключён.";
+            }
+            return null;
         }
 
         public bool TryRun(string verb, string orderId, out string message)
@@ -248,10 +406,10 @@ namespace LifeFromZero.UI.Runtime
             message = null;
             Resolve();
 
-            if (_service == null) { message = "Система доставки не подключена."; return false; }
+            if (!IsAlive(_service)) { message = "Система доставки не подключена."; return false; }
             if (string.IsNullOrEmpty(orderId)) { message = "Заказ не выбран."; return false; }
 
-            string blocked = CommandBlockReason;
+            string blocked = CheckBlockReasonForVerb(verb);
             if (blocked != null) { message = blocked; return false; }
 
             DeliveryResult result;

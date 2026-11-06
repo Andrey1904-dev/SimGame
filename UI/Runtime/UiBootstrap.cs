@@ -91,6 +91,17 @@ namespace LifeFromZero.UI.Runtime
 
         private UiRouter _router;
         private MapScreen _map;
+        private GameObject _modalGuard;
+        private bool _releaseModalGuardInLateUpdate;
+        private bool _hadActiveRouteLastFrame;
+        private LifeFromZero.City.Quarter.INotifyQuarterPlanSource _hookedPlanSource;
+        private LifeFromZero.City.Pause.StandalonePauseIntegration _hookedStandalonePause;
+
+        /// <summary>Активный экземпляр бутстрапа UI.</summary>
+        public static UiBootstrap Instance { get; private set; }
+
+        /// <summary>Текущий активный план района (null вне сцены района или до завершения генерации).</summary>
+        public QuarterPlan CurrentDistrictPlan => _plan;
 
         /// <summary>Отчёт последней привязки.</summary>
         public UiWiringReport Report { get; private set; } = new UiWiringReport();
@@ -110,13 +121,33 @@ namespace LifeFromZero.UI.Runtime
                 enabled = false;
                 return;
             }
+            Instance = this;
             Install();
+        }
+
+        private void Start()
+        {
+            // CityBootstrap строит район в своём Start(): если в Awake план ещё был null,
+            // подхватываем его здесь (и параллельно держим подписку на PlanChanged).
+            if (_router != null && _plan == null)
+            {
+                ResolveDistrict();
+                WireMap();
+            }
+            ResolvePauseOwner();
         }
 
         private void OnDestroy()
         {
             UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
-            if (_router != null && Router == _router) Router = null;
+            UnhookPlanSource();
+            UnhookStandalonePause();
+            if (_router != null)
+            {
+                _router.ModalOpenChanged -= OnRouterModalOpenChanged;
+                if (Router == _router) Router = null;
+            }
+            if (Instance == this) Instance = null;
         }
 
         private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene,
@@ -124,15 +155,32 @@ namespace LifeFromZero.UI.Runtime
         {
             if (_router == null) return;
 
-            // Мосты живут в сцене вместе с игрой: после перехода это другие объекты.
-            _deliveryBridge = null;
+            _releaseModalGuardInLateUpdate = false;
+            if (_modalGuard != null) _modalGuard.SetActive(false);
+
+            // ВАЖНО: НЕ обнуляем живые сериализованные/DontDestroyOnLoad-ссылки безусловно
+            // (SceneManager.sceneLoaded вызывается Unity в том числе сразу после Awake первой сцены!).
+            // Вместо этого очищаем только уничтоженные объекты старой сцены и обновляем мосты.
+            if (worldAdapter == null) worldAdapter = null;
+            if (snapshotSource == null) snapshotSource = null;
+            if (districtSource == null)
+            {
+                districtSource = null;
+                UnhookPlanSource();
+            }
+
+            var gameBridge = worldAdapter as UiGameBridge;
+            if (gameBridge != null) gameBridge.ResolveReferences();
+
+            var pauseSnapshot = snapshotSource as PauseUiSnapshotSource;
+            if (pauseSnapshot != null) pauseSnapshot.RefreshSource();
+
+            if (_deliveryBridge != null) _deliveryBridge.ResetSceneCache();
+
             _existingPause = null;
             _plan = null;
             _mapGeometry = null;
-
-            worldAdapter = null;
-            snapshotSource = null;
-            districtSource = null;
+            _router.Navigation.SetGraph(null);
 
             Report = new UiWiringReport();
             ResolveWorld();
@@ -148,7 +196,7 @@ namespace LifeFromZero.UI.Runtime
             _router.Configure(worldAdapter, snapshotSource, Resolve<PhoneScreen>(), _map,
                 Resolve<HudScreen>(), Resolve<PauseMenuScreen>());
 
-            if (logReport) Debug.Log("[UiBootstrap] после смены сцены: " + Report.Summary());
+            if (logReport) Debug.Log("[UiBootstrap] после смены сцены (" + scene.name + "): " + Report.Summary());
         }
 
         /// <summary>Точка входа для существующего загрузчика игры (если компонент не на сцене).</summary>
@@ -170,7 +218,10 @@ namespace LifeFromZero.UI.Runtime
         private void Install()
         {
             Report = new UiWiringReport();
+            EnsureModalGuard();
             _router = ResolveRouter();
+            _router.ModalOpenChanged -= OnRouterModalOpenChanged;
+            _router.ModalOpenChanged += OnRouterModalOpenChanged;
 
             ResolveWorld();
             ResolveSnapshot();
@@ -194,6 +245,36 @@ namespace LifeFromZero.UI.Runtime
             UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
         }
 
+        private void EnsureModalGuard()
+        {
+            if (_modalGuard != null) return;
+            Transform existing = transform.Find("UI Modal Guard");
+            if (existing != null) _modalGuard = existing.gameObject;
+            else
+            {
+                _modalGuard = new GameObject("UI Modal Guard");
+                _modalGuard.transform.SetParent(transform, false);
+            }
+            _modalGuard.SetActive(false);
+        }
+
+        private void OnRouterModalOpenChanged(bool isOpen)
+        {
+            EnsureModalGuard();
+            if (isOpen)
+            {
+                _releaseModalGuardInLateUpdate = false;
+                _modalGuard.SetActive(true);
+            }
+            else
+            {
+                // Держим ModalGuard активным до конца текущего кадра (LateUpdate),
+                // чтобы закрытие телефона/карты по Esc в Update(-50) не открывало
+                // PauseKeyboardInput в Update(0) того же самого кадра.
+                _releaseModalGuardInLateUpdate = true;
+            }
+        }
+
         private UiRouter ResolveRouter()
         {
             UiRouter router = UiRouter.Instance;
@@ -215,14 +296,40 @@ namespace LifeFromZero.UI.Runtime
         /// </summary>
         private void ResolvePauseOwner()
         {
-            var bridge = FindAnyObjectByType<UiGameBridge>();
-            if (bridge == null) bridge = worldAdapter as UiGameBridge;
+            var bridge = worldAdapter as UiGameBridge;
+            if (bridge == null) bridge = FindAnyObjectByType<UiGameBridge>();
+            if (bridge != null) bridge.ResolveReferences();
 
             if (bridge != null && bridge.HasExistingPause)
             {
                 _existingPause = bridge.ExistingPause;
                 _router.FallbackTimeScalePause = false;
-                // Экран паузы рисует данные существующей паузы, а не свои.
+                _router.ExternalPauseOwner = true;
+                _router.ReadsKeyboard = true; // P и M остаются активными у UiRouter; Esc в игре уступается City.Pause
+                _router.IsExternalPauseOpen = () => bridge != null && bridge.IsExistingPauseOpen;
+                _router.ReopenExternalPause = () =>
+                {
+                    var controller = bridge != null ? bridge.ExistingPauseController : null;
+                    if (controller != null) controller.Open();
+                };
+
+                var standalone = _existingPause as LifeFromZero.City.Pause.StandalonePauseIntegration;
+                if (standalone != _hookedStandalonePause)
+                {
+                    UnhookStandalonePause();
+                    if (standalone != null)
+                    {
+                        EnsureModalGuard();
+                        standalone.RegisterCompetingModalRoot(_modalGuard);
+                        standalone.SetRuntimeAction(LifeFromZero.City.Pause.PauseAction.Phone,
+                            OpenPhoneFromExternalPause, "[P]");
+                        standalone.SetRuntimeAction(LifeFromZero.City.Pause.PauseAction.Map,
+                            OpenMapFromExternalPause, "[M]");
+                        _hookedStandalonePause = standalone;
+                    }
+                }
+
+                // Экран паузы/HUD рисует данные существующей паузы, а не свои.
                 if (snapshotSource == null)
                 {
                     var adapter = bridge.GetComponent<PauseUiSnapshotSource>();
@@ -232,22 +339,53 @@ namespace LifeFromZero.UI.Runtime
                         Report.Ok("данные HUD/паузы из PauseDataSource игры");
                     }
                 }
-                // Клавиши Esc/P/M в проекте уже обрабатывает PauseKeyboardInput →
-                // PauseController. Если читать их ещё и здесь, меню будут открываться
-                // и закрываться одним нажатием одновременно.
-                _router.ReadsKeyboard = false;
-                Report.Ok("пауза игры (City.Pause): второй Time.timeScale и вторые клавиши отключены");
+                Report.Ok("пауза игры (City.Pause): Esc в игре у City.Pause, P/M и модальные окна у UiRouter");
             }
             else if (bridge != null)
             {
+                UnhookStandalonePause();
+                _router.ExternalPauseOwner = false;
+                _router.FallbackTimeScalePause = true;
+                _router.IsExternalPauseOpen = null;
+                _router.ReopenExternalPause = null;
                 Report.Miss("City.Pause — меню паузы на своём Time.timeScale; " +
-                            "клавиши Esc/P читает только UiRouter");
+                            "клавиши Esc/P/M читает сам UiRouter");
             }
             else
             {
+                UnhookStandalonePause();
+                _router.ExternalPauseOwner = false;
+                _router.FallbackTimeScalePause = true;
+                _router.IsExternalPauseOpen = null;
+                _router.ReopenExternalPause = null;
                 Report.Miss("UiGameBridge — адаптер мира не найден: клавиши P/M/Esc читает сам UiRouter, " +
                             "позиция игрока неизвестна");
             }
+        }
+
+        private void UnhookStandalonePause()
+        {
+            if (_hookedStandalonePause == null) return;
+            if (_modalGuard != null) _hookedStandalonePause.UnregisterCompetingModalRoot(_modalGuard);
+            _hookedStandalonePause.SetRuntimeAction(LifeFromZero.City.Pause.PauseAction.Phone, null);
+            _hookedStandalonePause.SetRuntimeAction(LifeFromZero.City.Pause.PauseAction.Map, null);
+            _hookedStandalonePause = null;
+        }
+
+        private void OpenPhoneFromExternalPause()
+        {
+            var bridge = worldAdapter as UiGameBridge ?? FindAnyObjectByType<UiGameBridge>();
+            var controller = bridge != null ? bridge.ExistingPauseController : null;
+            if (controller != null && controller.IsOpen) controller.Close();
+            if (_router != null) _router.OpenFromExternalPause(UiIntent.OpenPhoneFromPause);
+        }
+
+        private void OpenMapFromExternalPause()
+        {
+            var bridge = worldAdapter as UiGameBridge ?? FindAnyObjectByType<UiGameBridge>();
+            var controller = bridge != null ? bridge.ExistingPauseController : null;
+            if (controller != null && controller.IsOpen) controller.Close();
+            if (_router != null) _router.OpenFromExternalPause(UiIntent.OpenMapFromPause);
         }
 
         private void ResolveWorld()
@@ -280,42 +418,116 @@ namespace LifeFromZero.UI.Runtime
             QuarterPlan plan = null;
             LifeFromZero.City.Quarter.IQuarterPlanSource source =
                 districtSource as LifeFromZero.City.Quarter.IQuarterPlanSource;
-            if (source != null) plan = source.Plan;
-            if (plan == null) plan = _externalPlan;
-            if (plan == null)
+            if (source == null)
             {
                 var sources = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
                 if (sources != null)
                 {
+                    MonoBehaviour fallbackCandidate = null;
                     for (int i = 0; i < sources.Length; i++)
                     {
                         var candidate = sources[i] as LifeFromZero.City.Quarter.IQuarterPlanSource;
-                        if (candidate == null || candidate.Plan == null) continue;
-                        plan = candidate.Plan;
-                        break;
+                        if (candidate == null) continue;
+                        if (fallbackCandidate == null) fallbackCandidate = sources[i];
+                        if (candidate.Plan != null)
+                        {
+                            fallbackCandidate = sources[i];
+                            break;
+                        }
+                    }
+                    if (fallbackCandidate != null)
+                    {
+                        districtSource = fallbackCandidate;
+                        source = fallbackCandidate as LifeFromZero.City.Quarter.IQuarterPlanSource;
                     }
                 }
             }
 
+            HookPlanSource(source as LifeFromZero.City.Quarter.INotifyQuarterPlanSource);
+
+            if (source != null) plan = source.Plan;
+            if (plan == null) plan = _externalPlan;
+
             if (plan == null)
             {
-                Report.Miss("плана района (QuarterPlan) — карта покажет только сетку, маршрутов не будет");
+                Report.Miss("плана района (QuarterPlan) — ожидание генерации или сцена без района");
                 return;
             }
 
+            ApplyDistrictPlan(plan, true);
+        }
+
+        private void HookPlanSource(LifeFromZero.City.Quarter.INotifyQuarterPlanSource notifySource)
+        {
+            if (ReferenceEquals(_hookedPlanSource, notifySource)) return;
+            UnhookPlanSource();
+            if (notifySource == null) return;
+            notifySource.PlanChanged += OnDistrictPlanChanged;
+            _hookedPlanSource = notifySource;
+        }
+
+        private void UnhookPlanSource()
+        {
+            if (_hookedPlanSource != null) _hookedPlanSource.PlanChanged -= OnDistrictPlanChanged;
+            _hookedPlanSource = null;
+        }
+
+        private void OnDistrictPlanChanged(QuarterPlan plan)
+        {
+            if (_router == null) return;
+            if (plan == null)
+            {
+                _plan = null;
+                _mapGeometry = null;
+                _router.Navigation.SetGraph(null);
+                if (_map != null)
+                {
+                    _map.Geometry = null;
+                    if (_map.isActiveAndEnabled) _map.Refresh();
+                }
+                return;
+            }
+
+            ApplyDistrictPlan(plan, false);
+            WireMap();
+            if (_map != null && _map.isActiveAndEnabled) _map.Refresh();
+            if (logReport)
+                Debug.Log("[UiBootstrap] План района получен (" + plan.LayoutId + ", seed=" + plan.Seed + ").");
+        }
+
+        private void ApplyDistrictPlan(QuarterPlan plan, bool recordReport)
+        {
+            if (plan == null) return;
+
             QuarterPlanMapData mapData = QuarterPlanAdapter.Build(plan);
             var geometry = new QuarterMapGeometry(mapData);
-            Report.Ok("геометрия карты (" + geometry.RoadCount + " дорог, " + geometry.PointCount + " точек)");
+            if (recordReport)
+                Report.Ok("геометрия карты (" + geometry.RoadCount + " дорог, " + geometry.PointCount + " точек)");
 
             RoadGraphData graph = mapData.Graph;
             if (graph != null && graph.NodeCount > 0)
             {
                 _router.Navigation.SetGraph(graph);
-                Report.Ok("дорожный граф маршрутов (" + graph.NodeCount + " узлов, " + graph.EdgeCount + " рёбер)");
+                if (recordReport)
+                    Report.Ok("дорожный граф маршрутов (" + graph.NodeCount + " узлов, " + graph.EdgeCount + " рёбер)");
             }
-            else
+            else if (recordReport)
             {
                 Report.Miss("дорожного графа — маршрут не построить");
+            }
+
+            // Постоянные ориентиры района на карте: Квартира №67 и ПВЗ.
+            if (plan.PlayerHome != null)
+            {
+                _router.Navigation.Waypoints.SetHome(
+                    new MapPoint(plan.PlayerHome.EntranceDoor.X, plan.PlayerHome.EntranceDoor.Z),
+                    "Квартира №67");
+            }
+            if (plan.PickupPoint != null)
+            {
+                _router.Navigation.Waypoints.SetPickup(
+                    new MapPoint(plan.PickupPoint.InteractionPoint.X, plan.PickupPoint.InteractionPoint.Z),
+                    "ПВЗ");
             }
 
             _mapGeometry = geometry;
@@ -438,7 +650,26 @@ namespace LifeFromZero.UI.Runtime
                 if (bridge == null) return "Система заказов не подключена.";
                 string outcome;
                 if (bridge.TryRun(verb, orderId, out outcome))
+                {
+                    if (verb == DeliveryPhoneCommands.Complete ||
+                        verb == DeliveryPhoneCommands.Cancel ||
+                        verb == DeliveryPhoneCommands.Abandon)
+                    {
+                        _router.Navigation.OnOrderClosed(orderId);
+                    }
+                    else if (verb == DeliveryPhoneCommands.PickUp &&
+                             _router.Navigation.ActiveRoute != null &&
+                             _router.Navigation.ActiveRoute.DestinationId == WaypointService.OrderIdPrefix + orderId)
+                    {
+                        // Груз забран в ПВЗ: автоматически переключаем активный маршрут на адрес вручения.
+                        OnPhoneRoute(orderId);
+                    }
+
+                    if (snapshotSource != null) snapshotSource.NotifyChanged();
+                    else _router.RefreshSnapshot();
+
                     return string.IsNullOrEmpty(outcome) ? null : outcome;
+                }
                 return string.IsNullOrEmpty(outcome) ? "Действие с заказом не выполнено." : outcome;
             }
 
@@ -462,6 +693,11 @@ namespace LifeFromZero.UI.Runtime
 
         private string OnPhoneRoute(string orderId)
         {
+            if (_plan == null)
+            {
+                ResolveDistrict();
+                WireMap();
+            }
             if (_plan == null) return "Район не загружен — маршрут недоступен.";
             if (string.IsNullOrEmpty(orderId)) return "Заказ не выбран.";
 
@@ -519,19 +755,38 @@ namespace LifeFromZero.UI.Runtime
         {
             if (_router == null) return;
 
-            // Навигация обновляется здесь, а не в каждом экране: маршрут один.
-            if (_router.Navigation.ActiveRoute != null)
+            bool hasRoute = _router.Navigation.ActiveRoute != null;
+            if (hasRoute)
             {
                 MapPoint player = PlayerPosition();
                 _router.Navigation.Tick(player, Time.deltaTime);
 
-                Vector3 position;
-                float heading;
-                if (worldAdapter != null && worldAdapter.TryGetPlayerPose(out position, out heading))
+                if (!_router.IsModalOpen)
                 {
-                    // HUD получает свежие инструкции, пока роутер не в модальном окне.
-                    if (!_router.IsModalOpen) _router.RefreshSnapshot();
+                    _router.RefreshSnapshot();
+                    var hud = Resolve<HudScreen>();
+                    if (hud != null && hud.isActiveAndEnabled)
+                        hud.Render(_router.Snapshot, _router.Navigation);
                 }
+                _hadActiveRouteLastFrame = _router.Navigation.ActiveRoute != null;
+            }
+            else if (_hadActiveRouteLastFrame)
+            {
+                _hadActiveRouteLastFrame = false;
+                _router.RefreshSnapshot();
+                var hud = Resolve<HudScreen>();
+                if (hud != null && hud.isActiveAndEnabled)
+                    hud.Render(_router.Snapshot, _router.Navigation);
+            }
+        }
+
+        private void LateUpdate()
+        {
+            if (_releaseModalGuardInLateUpdate)
+            {
+                _releaseModalGuardInLateUpdate = false;
+                if (_modalGuard != null && (_router == null || !_router.IsModalOpen))
+                    _modalGuard.SetActive(false);
             }
         }
     }

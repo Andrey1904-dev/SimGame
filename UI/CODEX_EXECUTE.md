@@ -4,11 +4,116 @@
 Читается сверху вниз; каждый шаг заканчивается проверяемым результатом.
 
 > **Главное, что нельзя путать.** Всё, что ниже, проверено **вне Unity**:
-> компиляцией (`checkui.py`, Roslyn) и тестами (`runtests.py`, 92 теста). Это
-> доказывает логику, но **не** доказывает, что UI выглядит правильно в игре.
+> по-сборочной компиляцией всех 17 `.asmdef` + `Assembly-CSharp` + `Assembly-CSharp-Editor` (`AUDIT/tools/check_unity6_compile.py`, `checkui.py`, `checkeditor.py`, Roslyn) и тестами (`runtests.py`, 103 UI-теста; всего по репозиторию 508 C#-проверок). Это
+> доказывает логику и границы сборок, но **не** доказывает, что UI выглядит правильно в игре.
 > Скриншоты, шрифты, порядок батчей, клики по uGUI — не проверены. Пока в проекте
-> не запущена сцена, интерфейс считается **непроверенным**, и в отчётах так и надо
+> не запущена сцена, интерфейс считается **непроверенным в Unity**, и в отчётах так и надо
 > писать.
+
+---
+
+## 0. Точные команды интеграции и отката для Codex (`Unity 6000.3.27f1`)
+
+### 0.1. Подготовка и точка отката в локальном проекте
+
+```bash
+UNITY_BIN="/Applications/Unity/Hub/Editor/6000.3.27f1/Unity.app/Contents/MacOS/Unity"
+UNITY_PROJ="/Users/homepc/Projects/LifeFromZero"
+SIMGAME_REPO="/Users/homepc/Projects/SimGame"
+
+# 1. Проверить проект и зафиксировать точку отката ДО копирования
+cd "$UNITY_PROJ"
+ls -d Assets ProjectSettings
+cat ProjectSettings/ProjectVersion.txt
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git status --porcelain
+  git tag -f lfz-before-ui-city-integration HEAD
+else
+  ditto "$UNITY_PROJ" "${UNITY_PROJ}_backup_$(date -u +%Y%m%dT%H%M%SZ)"
+fi
+```
+
+### 0.2. Копирование модулей (`City` + `UI` + `Economy` + `Jobs/Delivery` + `Phone` + `Debts` + `UnityIntegrationKit`)
+
+`install_to_unity.sh` копирует только `.cs` и `.asmdef` (172 файла), **не трогает** `.unity`, префабы, пользовательские ассеты, существующие `.meta`, `Packages/` и `ProjectSettings/`, а при наличии одноимённого `.asmdef` в другом месте `Assets/` обновляет его на месте без создания дубликата сборки:
+
+```bash
+cd "$SIMGAME_REPO"
+git fetch origin
+git checkout arena/c02a16e9-simgame   # либо main после слияния PR
+git pull --ff-only
+
+# Шаг 1: сухой прогон (ничего не изменяет)
+bash City/UnityIntegration/install_to_unity.sh "$UNITY_PROJ" --dry-run
+
+# Шаг 2: копирование без перезаписи конфликтов
+bash City/UnityIntegration/install_to_unity.sh "$UNITY_PROJ" --apply
+
+# Только если в проекте уже лежали старые копии этих же .cs/.asmdef и владелец подтвердил обновление
+# (автоматически сохраняет бэкап заменяемых файлов и их .meta в LifeFromZeroIntegration/backups/install-<UTC>/):
+# bash City/UnityIntegration/install_to_unity.sh "$UNITY_PROJ" --apply --overwrite
+```
+
+### 0.3. Пакетная проверка компиляции, обнаружение сцены и сухие прогоны в Unity (при закрытом Editor)
+
+```bash
+# Полный прогон этапов 1–8 (статические проверки + структура Assets + EditMode/PlayMode + DetectBatch + RunBatchVerify)
+bash "$SIMGAME_REPO/City/UnityIntegration/run_checks.sh" \
+  --unity-project "$UNITY_PROJ" \
+  --unity "$UNITY_BIN"
+
+# Посмотреть выбранную стартовую сцену из отчёта обнаружения:
+ls -t "$UNITY_PROJ/LifeFromZeroIntegration"/discovery-*.md | head -n 1 | xargs head -n 45
+
+# Сухой прогон интеграции города и паузы в стартовую сцену (ЗАМЕНИТЕ <START_SCENE> на путь из отчёта discovery):
+"$UNITY_BIN" -batchmode -quit -projectPath "$UNITY_PROJ" \
+  -executeMethod LifeFromZero.Setup.LifeFromZeroGameIntegration.IntegrateBatch \
+  -lfzStartScene "<START_SCENE>" -lfzDryRun \
+  -logFile /tmp/lfz-city-dryrun.log
+
+# Применение интеграции города и паузы (делает бэкап сцены и EditorBuildSettings.asset в LifeFromZeroIntegration/backups/):
+"$UNITY_BIN" -batchmode -quit -projectPath "$UNITY_PROJ" \
+  -executeMethod LifeFromZero.Setup.LifeFromZeroGameIntegration.IntegrateBatch \
+  -lfzStartScene "<START_SCENE>" \
+  -logFile /tmp/lfz-city-apply.log
+
+# Сухой прогон и установка UI в стартовую сцену:
+"$UNITY_BIN" -batchmode -quit -projectPath "$UNITY_PROJ" \
+  -executeMethod LifeFromZero.UI.Editor.UiInstaller.InstallBatch \
+  -lfzUiScene "<START_SCENE>" -lfzUiDryRun \
+  -logFile /tmp/lfz-ui-dryrun.log
+
+"$UNITY_BIN" -batchmode -quit -projectPath "$UNITY_PROJ" \
+  -executeMethod LifeFromZero.UI.Editor.UiInstaller.InstallBatch \
+  -lfzUiScene "<START_SCENE>" \
+  -logFile /tmp/lfz-ui-apply.log
+
+# Read-only пост-проверка всех сцен проекта:
+"$UNITY_BIN" -batchmode -quit -projectPath "$UNITY_PROJ" \
+  -executeMethod LifeFromZero.UI.Editor.UiInstaller.RunBatchVerify \
+  -logFile /tmp/lfz-ui-verify.log
+```
+
+### 0.4. Точные команды отката (Rollback)
+
+1. **Откат сцен и `EditorBuildSettings.asset` из автоматического бэкапа интегратора** (при закрытом Unity Editor):
+   ```bash
+   cd "$UNITY_PROJ"
+   LAST_BACKUP="$(ls -td LifeFromZeroIntegration/backups/* | head -n 1)"
+   echo "Восстановление из: $LAST_BACKUP"
+   rsync -av "$LAST_BACKUP/" "$UNITY_PROJ/"
+   ```
+2. **Полный откат локального Unity-проекта к точке до импорта** (если проект в Git и тег создан на шаге 0.1):
+   ```bash
+   cd "$UNITY_PROJ"
+   git reset --hard lfz-before-ui-city-integration
+   git clean -fd -- Assets/City Assets/UI Assets/_Project/SimGame
+   ```
+3. **Откат в репозитории `SimGame` к коммиту до интеграции** (при необходимости):
+   ```bash
+   cd "$SIMGAME_REPO"
+   git checkout backup-before-integration   # f8334ba8d95dafdfd39ef63f346e9bccf585af2b
+   ```
 
 ---
 
@@ -16,16 +121,16 @@
 
 | Область | Файлы | Состояние |
 |---|---|---|
-| Состояния экранов, роутер | `UI/Core/UiStateMachine.cs`, `UI/Runtime/UiRouter.cs` | готово, тесты |
+| Состояния экранов, роутер | `UI/Core/UiStateMachine.cs`, `UI/Runtime/UiRouter.cs` | готово, координировано с `City.Pause`, тесты |
 | Карта: данные, граф, маршруты | `UI/Core/MapCalibration*.cs`, `RoadGraphData.cs`, `RoutePlanner.cs`, `RouteGeometryBuilder.cs` | готово, тесты |
 | Карта: отрисовка мешем | `UI/Runtime/MapCanvasGraphic.cs`, `MapScreen.cs` | **не проверено в Unity** |
-| Навигация, HUD-подсказки | `UI/Core/NavigationService.cs`, `RouteNavigator` | готово, тесты |
-| Мост «район → карта» | `UI/Core/QuarterPlanAdapter.cs`, `UI/Runtime/QuarterMapGeometry.cs` | готово, тесты |
-| Мост к игре | `UI/Runtime/UiGameBridge.cs` (`UiGameBridge`, `PauseUiSnapshotSource`) | готов; **проверен только стабами** |
-| Телефон (экраны, данные) | `UI/Core/PhoneData.cs`, `UI/Runtime/PhoneScreen.cs` | данные готовы; **источник данных не подключён** |
+| Навигация, HUD-подсказки | `UI/Core/NavigationService.cs`, `RouteNavigator`, `UiBootstrap.cs` | готово, живой апдейт HUD в `Update()`, тесты |
+| Мост «район → карта/доставка» | `UI/Core/QuarterPlanAdapter.cs`, `UI/Runtime/QuarterMapGeometry.cs`, `UI/Runtime/QuarterLocationProvider.cs` | готово (`INotifyQuarterPlanSource.PlanChanged`, `ResolveLocationId`), тесты |
+| Мост к игре | `UI/Runtime/UiGameBridge.cs` (`UiGameBridge`, `PauseUiSnapshotSource`) | готов; **проверен стабами** |
+| Телефон и `PhoneFacade` | `UI/Core/PhoneData.cs`, `UI/Runtime/PhoneScreen.cs`, `UnityIntegrationKit/PhoneUiBridge.cs` | мост `PhoneFacadeUiBridge : IPhoneDataSource` и `DeliveryServiceBridge` готовы |
 | Меню паузы | `UI/Core/PauseLayout.cs`, `UI/Runtime/PauseMenuScreen.cs` | раскладка измерена по `Pause Menu.PNG`, 0 замечаний `Validate()`; **в игре не сверялась** |
-| Установщик в сцену | `UI/Editor/UiInstaller.cs` | готов, идемпотентен, **не запускался в Unity** |
-| Тесты | `UI/Tests/*` (92) | зелёные вне Unity |
+| Установщик в сцену | `UI/Editor/UiInstaller.cs` | готов (`InstallBatch`, `RunBatchVerify`, `SerializedObject`), идемпотентен, **не запускался в Unity** |
+| Тесты | `UI/Tests/*` (103) + `AUDIT/tools/check_unity6_compile.py` | 103/103 PASS вне Unity, 0 ошибок Roslyn |
 
 ## 2. Порядок подключения (делать именно так)
 

@@ -34,6 +34,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using LifeFromZero.City.Pause;
+using LifeFromZero.City.Quarter;
 using LifeFromZero.City.Quarter.UnityAdapter;
 
 namespace LifeFromZero.Setup
@@ -874,6 +875,28 @@ namespace LifeFromZero.Setup
                 EditorSceneManager.CloseScene(scene, true);
             }
             AssetDatabase.Refresh();
+            TryInstallUiByPath(DistrictScenePath);
+        }
+
+        private static void TryInstallUiByPath(string scenePath)
+        {
+            try
+            {
+                Type uiInstaller = LifeFromZeroSetup.FindType("LifeFromZero.UI.Editor.UiInstaller");
+                if (uiInstaller == null) return;
+                var method = uiInstaller.GetMethod(
+                    "Install",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                    null,
+                    new[] { typeof(string), typeof(bool) },
+                    null);
+                if (method != null)
+                    method.Invoke(null, new object[] { scenePath, false });
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning(LogTag + " автоустановка UI в сцену района пропущена: " + ex.Message);
+            }
         }
 
         private static void RegisterInBuildSettings(IntegrationPlan plan, bool startInBuildSettings, bool anyBuildScenes)
@@ -1073,7 +1096,9 @@ namespace LifeFromZero.Setup
             if (type == typeof(PauseView)) return true;
             if (typeof(PauseIntegration).IsAssignableFrom(type)) return true;
             if (typeof(PauseDataSource).IsAssignableFrom(type)) return true;
-            return type.Name == "PauseKeyboardInput" || type.Name == "District750Link";
+            string ns = type.Namespace ?? string.Empty;
+            if (ns == "LifeFromZero.UI" || ns.StartsWith("LifeFromZero.UI.", StringComparison.Ordinal)) return true;
+            return type.Name == "PauseKeyboardInput" || type.Name == "District750Link" || type.Name == "PlayerHomeAnchor";
         }
 
         private static bool Matches(string lowerName, string[] hints)

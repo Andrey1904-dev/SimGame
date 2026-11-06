@@ -53,13 +53,19 @@ def references(extra=None):
         refs.append(MetadataReference.CreateFromFile(p))
     return refs
 
-def compile_to_image(files, extra_refs=None, out=None, defines=None):
+def compile_to_image(files, extra_refs=None, out=None, defines=None, asm_name=None):
+    from System.Collections.Generic import List
+    opts = CSharpParseOptions(LanguageVersion.CSharp9)
+    if defines:
+        sym = List[str]()
+        for d in defines:
+            sym.Add(str(d))
+        opts = opts.WithPreprocessorSymbols(sym)
     trees = []
     for f in files:
         text = open(f, encoding="utf-8-sig").read()
-        opts = CSharpParseOptions(LanguageVersion.CSharp9)
         trees.append(CSharpSyntaxTree.ParseText(text, opts, f))
-    asmname = "Asm%d" % (abs(hash(tuple(files))) % 100000)
+    asmname = asm_name or ("Asm%d" % (abs(hash(tuple(files))) % 100000))
     from System.Collections.Generic import List
     from Microsoft.CodeAnalysis import SyntaxTree as STree
     from Microsoft.CodeAnalysis import MetadataReference as MRef

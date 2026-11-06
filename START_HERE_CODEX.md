@@ -1,8 +1,22 @@
 # START HERE — SimGame → LIFE FROM ZERO
 
-Комплект для подготовки импорта. **ТЗ №021:** финансовые контракты Economy, Delivery и Debts
-доведены, тесты **реально прогнаны** (Economy 60, Delivery 55, Debts 97 — все PASS).
-Unity-проект по-прежнему не был доступен: сборка внутри Unity и EditMode-прогон — задача Codex.
+> **Актуальное состояние (интеграция `City` + `Pause` + `UI` + доменных модулей под Unity `6000.3.27f1`):**
+> единый сценарий установки, проверки и отката для Codex находится в **`UI/CODEX_EXECUTE.md` (§0)** и **`City/CODEX_EXECUTE.md`**.
+>
+> * Единый безопасный установщик всех модулей (`City`, `UI`, `Economy`, `Jobs/Delivery`, `Phone`, `Debts`, `UnityIntegrationKit`, 172 файла без перезаписи сцен, пользовательских ассетов, `.meta` и `ProjectSettings`):
+>   ```bash
+>   bash City/UnityIntegration/install_to_unity.sh "/Users/homepc/Projects/LifeFromZero" --dry-run
+>   bash City/UnityIntegration/install_to_unity.sh "/Users/homepc/Projects/LifeFromZero" --apply
+>   ```
+> * Сводная проверка (статические проверки + структура `Assets/` + EditMode/PlayMode + `DetectBatch` + `UiInstaller.RunBatchVerify`):
+>   ```bash
+>   bash City/UnityIntegration/run_checks.sh --unity-project "/Users/homepc/Projects/LifeFromZero"
+>   ```
+> * Откат: копии изменённых файлов и сцен автоматически сохраняются в `<проект>/LifeFromZeroIntegration/backups/<UTC-штамп>/` (точные команды отката — в `UI/CODEX_EXECUTE.md` §0.4; базовый тег в `SimGame` до интеграции — `backup-before-integration`).
+
+Комплект для подготовки импорта. **ТЗ №021 + интеграция PR #14 / PR #15:** финансовые контракты Economy, Delivery и Debts, город District750 и система UI
+доведены, тесты **реально прогнаны** (Economy 60, Delivery 55, Phone 93, Debts 97, City 100, UI 103 — всего **508 PASS**, плюс по-сборочная Roslyn-компиляция всех 17 `.asmdef` + `Assembly-CSharp` + `Assembly-CSharp-Editor`).
+Unity-проект в облачной среде по-прежнему недоступен: сборка внутри Unity 6000.3.27f1, EditMode/PlayMode-прогон и визуальная проверка в Play Mode — задача Codex.
 Режим A (сессия без сохранений) готов к подключению. Режим B (сохранения) НЕ готов: см. §«Режим B».
 
 Ветка комплекта: `arena/98f6320f-simgame` (влита в `main` PR #7 вместе с предшествующим `88ea306`); рабочая ветка проверки — `arena/1316e6a7-simgame`. Актуальный SHA для импорта — тот, что указан в `TZ021_FINANCIAL_CONTRACTS_REPORT.md` §0 (или `git rev-parse HEAD` в checkout этой ветки). Не ориентируйтесь на SHA из ранних редакций этого файла.

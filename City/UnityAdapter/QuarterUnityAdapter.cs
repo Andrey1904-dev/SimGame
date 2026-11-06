@@ -31,7 +31,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
     ///   new QuarterUnityAdapter().Build(plan, parentTransform);
     /// или повесить компонент на пустой объект и задать Seed в инспекторе.
     /// </summary>
-    public sealed class QuarterUnityAdapter : MonoBehaviour, IQuarterPlanSource
+    public sealed class QuarterUnityAdapter : MonoBehaviour, INotifyQuarterPlanSource
     {
         [Header("Генерация")]
         [SerializeField] private int seed = 1904;
@@ -58,6 +58,13 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
 
         /// <summary>План уже сгенерирован.</summary>
         public bool HasPlan => _planSlot.HasPlan;
+
+        /// <summary>Вызывается после завершения сборки квартала или его очистки.</summary>
+        public event System.Action<QuarterPlan> PlanChanged
+        {
+            add => _planSlot.PlanChanged += value;
+            remove => _planSlot.PlanChanged -= value;
+        }
 
         /// <summary>
         /// Уничтожает построенный квартал и его меши деталей. Материалы кэша
@@ -140,6 +147,7 @@ namespace LifeFromZero.City.Quarter.UnityAdapter
             foreach (PlacedObject obj in plan.Objects)
                 CreateObject(obj, root.transform);
 
+            _planSlot.NotifyBuilt();
             return root;
         }
 
