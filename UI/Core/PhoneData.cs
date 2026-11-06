@@ -23,6 +23,8 @@ namespace LifeFromZero.UI.Core
         public const string Contacts = "contacts";
         public const string Bank = "bank";
         public const string Orders = "orders";
+        /// <summary>Алиас модуля <c>LifeFromZero.Phone</c> (<c>PhoneAppRegistry</c> регистрирует «Работу» как <c>jobs</c>).</summary>
+        public const string LegacyJobs = "jobs";
         public const string Tasks = "tasks";
         public const string Ads = "ads";
         public const string Education = "education";
@@ -48,6 +50,14 @@ namespace LifeFromZero.UI.Core
             if (string.IsNullOrWhiteSpace(appId)) return false;
             string id = appId.Trim().ToLowerInvariant();
             return id == "map" || id == "maps" || id == "карта";
+        }
+
+        /// <summary>Нормализует идентификатор приложения между модулем Phone (<c>jobs</c>) и UI (<c>orders</c>).</summary>
+        public static string Normalize(string appId)
+        {
+            if (string.IsNullOrWhiteSpace(appId)) return string.Empty;
+            string id = appId.Trim().ToLowerInvariant();
+            return id == LegacyJobs ? Orders : id;
         }
     }
 

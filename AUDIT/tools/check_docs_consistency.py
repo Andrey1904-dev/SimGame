@@ -61,11 +61,17 @@ counts = {
 }
 print("suite.Add по каталогам тестов:", counts)
 
+domain_total = str(counts['Economy'] + counts['Jobs'] + counts['Phone'] + counts['Debts'] + counts['City'])
+ui_total = str(counts['UI'])
+grand_total = str(int(domain_total) + int(ui_total))
+
 tr = open('AUDIT/TEST_RESULTS.md', encoding='utf-8').read()
-if '403' not in tr:
-    errors.append("TEST_RESULTS.md: не найдено итоговое число 403")
-if '99' not in tr:
-    errors.append("TEST_RESULTS.md: не найдено число UI-тестов 99")
+if domain_total not in tr:
+    errors.append(f"TEST_RESULTS.md: не найдено итоговое число модульных тестов {domain_total}")
+if ui_total not in tr:
+    errors.append(f"TEST_RESULTS.md: не найдено число UI-тестов {ui_total}")
+if grand_total not in tr:
+    errors.append(f"TEST_RESULTS.md: не найдено суммарное число тестов {grand_total}")
 
 # 4. Ключевой инвариант P0: Build не должен присваивать план до ClearBuilt.
 adapter = open('City/UnityAdapter/QuarterUnityAdapter.cs', encoding='utf-8').read()

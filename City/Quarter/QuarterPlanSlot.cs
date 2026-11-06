@@ -19,7 +19,7 @@ using System;
 namespace LifeFromZero.City.Quarter
 {
     /// <summary>Хранилище плана последней успешной сборки квартала.</summary>
-    public sealed class QuarterPlanSlot
+    public sealed class QuarterPlanSlot : INotifyQuarterPlanSource
     {
         /// <summary>План последней сборки или null, если квартал не построен/снесён.</summary>
         public QuarterPlan Plan { get; private set; }
@@ -28,12 +28,20 @@ namespace LifeFromZero.City.Quarter
         public bool HasPlan => Plan != null;
 
         /// <summary>
+        /// Событие смены текущего плана: <c>null</c> при очистке, готовый <see cref="QuarterPlan"/>
+        /// после завершения сборки (<see cref="NotifyBuilt"/>).
+        /// </summary>
+        public event Action<QuarterPlan> PlanChanged;
+
+        /// <summary>
         /// Сбрасывает план. Вызывается при сносе построенного квартала: держать
         /// план снесённого района нельзя — карта нарисовала бы несуществующий город.
         /// </summary>
         public void Clear()
         {
+            bool hadPlan = Plan != null;
             Plan = null;
+            if (hadPlan) PlanChanged?.Invoke(null);
         }
 
         /// <summary>
@@ -44,9 +52,17 @@ namespace LifeFromZero.City.Quarter
         {
             if (plan == null) throw new ArgumentNullException(nameof(plan));
 
-            Clear();
+            Plan = null;
             Plan = plan;
             return Plan;
+        }
+
+        /// <summary>
+        /// Уведомляет подписчиков, что сборка объектов квартала по <see cref="Plan"/> завершена.
+        /// </summary>
+        public void NotifyBuilt()
+        {
+            if (Plan != null) PlanChanged?.Invoke(Plan);
         }
     }
 }

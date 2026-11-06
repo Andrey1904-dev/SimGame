@@ -63,18 +63,44 @@ namespace LifeFromZero.UI.Runtime
         /// <summary>Найденная существующая пауза (может быть null).</summary>
         public PauseIntegration ExistingPause => existingPause;
 
+        /// <summary>Контроллер существующей паузы (если в сцене есть City.Pause).</summary>
+        public PauseController ExistingPauseController =>
+            PauseController.Instance != null ? PauseController.Instance : FindAnyObjectByType<PauseController>();
+
         /// <summary>Есть ли в сцене чужая пауза, которую нельзя дублировать.</summary>
-        public bool HasExistingPause => existingPause != null;
+        public bool HasExistingPause => existingPause != null || PauseController.Instance != null;
+
+        /// <summary>Открыто ли сейчас внешнее меню паузы City.Pause.</summary>
+        public bool IsExistingPauseOpen
+        {
+            get
+            {
+                PauseController controller = ExistingPauseController;
+                return controller != null && controller.IsOpen;
+            }
+        }
 
         public Transform Player => ResolvePlayer();
 
         private void Awake() => ResolveReferences();
 
-        /// <summary>Найти камеру/паузу, если они не назначены в инспекторе.</summary>
+        /// <summary>Найти игрока/камеру/паузу, если они не назначены или уничтожены при смене сцены.</summary>
         public void ResolveReferences()
         {
             if (existingPause == null) existingPause = FindAnyObjectByType<PauseIntegration>();
             if (menuActions == null) menuActions = FindAnyObjectByType<UiMenuActions>();
+            if (player == null)
+            {
+                try
+                {
+                    GameObject tagged = GameObject.FindWithTag("Player");
+                    if (tagged != null && tagged.activeInHierarchy) player = tagged.transform;
+                }
+                catch
+                {
+                    // В стабах или кастомных настройках тег может отсутствовать — переходим к камере.
+                }
+            }
             if (player == null)
             {
                 Camera camera = Camera.main;
@@ -108,7 +134,10 @@ namespace LifeFromZero.UI.Runtime
             }
 
             position = target.position;
-            headingDegrees = target.eulerAngles.y;
+            Camera mainCam = Camera.main;
+            headingDegrees = mainCam != null && mainCam.isActiveAndEnabled
+                ? mainCam.transform.eulerAngles.y
+                : target.eulerAngles.y;
             return true;
         }
 
@@ -138,25 +167,35 @@ namespace LifeFromZero.UI.Runtime
 
         public override IDisposable LockGameplayInput(string reason)
         {
-            if (playerInputBehaviours == null || playerInputBehaviours.Length == 0)
+            if (playerInputBehaviours != null && playerInputBehaviours.Length > 0)
             {
-                // Нечего блокировать — управление останется за игроком. Это хуже, чем
-                // блокировка, но лучше, чем остановить время и оставить ввод активным.
-                Debug.LogWarning("[UiGameBridge] Не назначены Player Input Behaviours: " +
-                                 "на время окна персонаж продолжит двигаться (" + reason + ").");
-                return null;
+                var locked = new List<Behaviour>(playerInputBehaviours.Length);
+                bool hasAnyLiveBehaviour = false;
+                for (int i = 0; i < playerInputBehaviours.Length; i++)
+                {
+                    Behaviour behaviour = playerInputBehaviours[i];
+                    if (behaviour == null) continue;
+                    hasAnyLiveBehaviour = true;
+                    if (!behaviour.enabled) continue;
+                    behaviour.enabled = false;
+                    locked.Add(behaviour);
+                }
+
+                if (hasAnyLiveBehaviour) return new InputLock(locked);
             }
 
-            var locked = new List<Behaviour>(playerInputBehaviours.Length);
-            for (int i = 0; i < playerInputBehaviours.Length; i++)
+            // Если список на мосте пуст или относился к выгруженной сцене, переиспользуем
+            // уже настроенный PauseIntegration (StandalonePauseIntegration.playerInputBehaviours).
+            if (existingPause == null) existingPause = FindAnyObjectByType<PauseIntegration>();
+            if (existingPause != null)
             {
-                Behaviour behaviour = playerInputBehaviours[i];
-                if (behaviour == null || !behaviour.enabled) continue;
-                behaviour.enabled = false;
-                locked.Add(behaviour);
+                IDisposable pauseLock = existingPause.AcquireGameplayLock();
+                if (pauseLock != null) return pauseLock;
             }
 
-            return new InputLock(locked);
+            Debug.LogWarning("[UiGameBridge] Не назначены Player Input Behaviours: " +
+                             "на время окна персонаж продолжит двигаться (" + reason + ").");
+            return null;
         }
 
         public override bool IsMenuActionAvailable(string actionId) => Availability(actionId);
@@ -305,7 +344,7 @@ namespace LifeFromZero.UI.Runtime
         [Tooltip("Существующий источник данных игры. Пусто — ищется PauseDataSource в сцене.")]
         [SerializeField] private PauseDataSource dataSource;
 
-        private bool _hooked;
+        private PauseDataSource _hookedSource;
 
         /// <summary>Есть ли реальный источник данных.</summary>
         public bool HasSource => dataSource != null;
@@ -334,16 +373,17 @@ namespace LifeFromZero.UI.Runtime
 
         private void Hook()
         {
-            if (_hooked || dataSource == null) return;
+            if (ReferenceEquals(_hookedSource, dataSource) && dataSource != null) return;
+            Unhook();
+            if (dataSource == null) return;
             dataSource.Changed += OnSourceChanged;
-            _hooked = true;
+            _hookedSource = dataSource;
         }
 
         private void Unhook()
         {
-            if (!_hooked || dataSource == null) return;
-            dataSource.Changed -= OnSourceChanged;
-            _hooked = false;
+            if (_hookedSource != null) _hookedSource.Changed -= OnSourceChanged;
+            _hookedSource = null;
         }
 
         private void OnSourceChanged() => NotifyChanged();

@@ -385,10 +385,11 @@ namespace LifeFromZero.UI.Runtime
 
         private PhoneAppTile FindApp(string id)
         {
+            string normalized = PhoneAppIds.Normalize(id);
             IReadOnlyList<PhoneAppTile> apps = _data.Apps ?? Array.Empty<PhoneAppTile>();
             for (int i = 0; i < apps.Count; i++)
             {
-                if (apps[i].Id == id) return apps[i];
+                if (apps[i].Id == id || PhoneAppIds.Normalize(apps[i].Id) == normalized) return apps[i];
             }
             return null;
         }
@@ -404,7 +405,7 @@ namespace LifeFromZero.UI.Runtime
                 return;
             }
 
-            switch (appId)
+            switch (PhoneAppIds.Normalize(appId))
             {
                 case PhoneAppIds.Messages:
                     ShowPage(PhonePage.Messages);
@@ -419,14 +420,13 @@ namespace LifeFromZero.UI.Runtime
                     ShowPage(PhonePage.Tasks);
                     return;
                 case PhoneAppIds.Calls:
-                    if (_data.Call != null) ShowPage(PhonePage.Call);
-                    else ShowPage(PhonePage.Call);
+                    ShowPage(PhonePage.Call);
                     return;
             }
 
             string error = ActionHandler != null ? ActionHandler.Invoke(PhoneActions.OpenApp + appId) : null;
             if (!string.IsNullOrEmpty(error)) ShowToast(error);
-            else ShowToast("Раздел «" + app.Title + "» открывается в телефоне игрока.");
+            else ShowToast("Раздел «" + (app != null ? app.Title : appId) + "» открывается в телефоне игрока.");
         }
 
         // --- сообщения ---------------------------------------------------------
@@ -789,7 +789,12 @@ namespace LifeFromZero.UI.Runtime
         private void OnRoutePressed(string orderId)
         {
             string message = RouteHandler != null ? RouteHandler.Invoke(orderId) : "Маршрут недоступен.";
-            if (!string.IsNullOrEmpty(message)) ShowToast(message);
+            if (!string.IsNullOrEmpty(message))
+            {
+                // При ошибке построения маршрута телефон остаётся открытым, чтобы игрок увидел причину.
+                ShowToast(message);
+                return;
+            }
             if (UiRouter.Instance != null) UiRouter.Instance.RequestIntent(UiIntent.Back);
         }
 
@@ -803,14 +808,14 @@ namespace LifeFromZero.UI.Runtime
                 return;
             }
 
-            string error = ActionHandler != null ? ActionHandler.Invoke(actionId + orderId) : null;
+            string message = ActionHandler != null ? ActionHandler.Invoke(actionId + orderId) : null;
             Refresh();
-            if (!string.IsNullOrEmpty(error)) ShowToast(error);
-            else if (_page == PhonePage.Order)
+            if (_page == PhonePage.Order)
             {
                 OrderView updated = FindOrder(orderId);
                 if (updated == null) ShowPage(PhonePage.Orders);
             }
+            if (!string.IsNullOrEmpty(message)) ShowToast(message);
         }
 
         // --- банк --------------------------------------------------------------

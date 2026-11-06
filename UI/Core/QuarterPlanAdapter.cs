@@ -158,20 +158,128 @@ namespace LifeFromZero.UI.Core
             return new QuarterPlanMapData(plan.Size, roads, points, graph);
         }
 
-        /// <summary>Найти мировую точку доставки по Id (у DeliveryPointInfo нет индекса).</summary>
+        /// <summary>
+        /// Найти мировую точку по Id точки доставки или объекта района.
+        /// Поддерживает точные <c>drop-*</c> Id, а также алиасы ПВЗ/зданий/коммерции
+        /// (<c>pvz-01</c> → <c>drop-pvz-01</c>, <c>bld-n3</c> → <c>drop-bld-n3-1</c>, <c>player.home</c>).
+        /// </summary>
         public static bool TryGetDeliveryPosition(QuarterPlan plan, string deliveryPointId, out MapPoint position)
         {
             position = new MapPoint(0f, 0f);
-            if (plan == null || plan.DeliveryPoints == null || string.IsNullOrEmpty(deliveryPointId)) return false;
+            if (plan == null || string.IsNullOrEmpty(deliveryPointId)) return false;
 
-            for (int i = 0; i < plan.DeliveryPoints.Count; i++)
+            if (plan.DeliveryPoints != null)
             {
-                DeliveryPointInfo point = plan.DeliveryPoints[i];
-                if (!string.Equals(point.Id, deliveryPointId, StringComparison.Ordinal)) continue;
-                position = new MapPoint(point.Position.X, point.Position.Z);
+                for (int i = 0; i < plan.DeliveryPoints.Count; i++)
+                {
+                    DeliveryPointInfo point = plan.DeliveryPoints[i];
+                    if (!string.Equals(point.Id, deliveryPointId, StringComparison.Ordinal)) continue;
+                    position = new MapPoint(point.Position.X, point.Position.Z);
+                    return true;
+                }
+
+                string dropExact = "drop-" + deliveryPointId;
+                string dropFirstEntrance = dropExact + "-1";
+                for (int i = 0; i < plan.DeliveryPoints.Count; i++)
+                {
+                    DeliveryPointInfo point = plan.DeliveryPoints[i];
+                    if (string.Equals(point.Id, dropExact, StringComparison.Ordinal) ||
+                        string.Equals(point.Id, dropFirstEntrance, StringComparison.Ordinal) ||
+                        string.Equals(point.BuildingId, deliveryPointId, StringComparison.Ordinal))
+                    {
+                        position = new MapPoint(point.Position.X, point.Position.Z);
+                        return true;
+                    }
+                }
+            }
+
+            if (plan.PickupPoint != null &&
+                string.Equals(plan.PickupPoint.Id, deliveryPointId, StringComparison.Ordinal))
+            {
+                position = new MapPoint(plan.PickupPoint.InteractionPoint.X, plan.PickupPoint.InteractionPoint.Z);
                 return true;
             }
+
+            if (plan.PlayerHome != null)
+            {
+                if (string.Equals(PlayerHomeInfo.SpecialId, deliveryPointId, StringComparison.Ordinal) ||
+                    string.Equals("player.home.door", deliveryPointId, StringComparison.Ordinal) ||
+                    string.Equals(plan.PlayerHome.BuildingId, deliveryPointId, StringComparison.Ordinal))
+                {
+                    position = new MapPoint(plan.PlayerHome.EntranceDoor.X, plan.PlayerHome.EntranceDoor.Z);
+                    return true;
+                }
+                if (string.Equals("player.home.exit", deliveryPointId, StringComparison.Ordinal))
+                {
+                    position = new MapPoint(plan.PlayerHome.CourtyardExit.X, plan.PlayerHome.CourtyardExit.Z);
+                    return true;
+                }
+            }
+
+            if (plan.DistrictPoints != null)
+            {
+                for (int i = 0; i < plan.DistrictPoints.Count; i++)
+                {
+                    DistrictPointInfo dp = plan.DistrictPoints[i];
+                    if (!string.Equals(dp.Id, deliveryPointId, StringComparison.Ordinal)) continue;
+                    if (dp.InteractionPoint.HasValue)
+                        position = new MapPoint(dp.InteractionPoint.Value.X, dp.InteractionPoint.Value.Z);
+                    else
+                        position = new MapPoint(dp.Center.X, dp.Center.Z);
+                    return true;
+                }
+            }
+
             return false;
+        }
+
+        /// <summary>
+        /// Определяет Id ближайшей точки доставки/выдачи в радиусе взаимодействия от мировых
+        /// координат игрока <paramref name="playerPosition"/>. Если игрок не у точки — пустая строка.
+        /// </summary>
+        public static string ResolveLocationId(QuarterPlan plan, MapPoint playerPosition, float minRadiusMeters = 3.0f)
+        {
+            if (plan == null ||
+                float.IsNaN(playerPosition.X) || float.IsInfinity(playerPosition.X) ||
+                float.IsNaN(playerPosition.Z) || float.IsInfinity(playerPosition.Z))
+            {
+                return string.Empty;
+            }
+            if (minRadiusMeters < 0.1f || float.IsNaN(minRadiusMeters) || float.IsInfinity(minRadiusMeters))
+                minRadiusMeters = DeliveryPointInfo.DefaultInteractionRadius;
+
+            string bestId = string.Empty;
+            float bestDistSq = float.MaxValue;
+
+            if (plan.DeliveryPoints != null)
+            {
+                for (int i = 0; i < plan.DeliveryPoints.Count; i++)
+                {
+                    DeliveryPointInfo point = plan.DeliveryPoints[i];
+                    float radius = Math.Max(point.InteractionRadius, minRadiusMeters);
+                    float dx = playerPosition.X - point.Position.X;
+                    float dz = playerPosition.Z - point.Position.Z;
+                    float distSq = dx * dx + dz * dz;
+                    if (distSq <= radius * radius && distSq < bestDistSq)
+                    {
+                        bestDistSq = distSq;
+                        bestId = point.Id;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(bestId)) return bestId;
+
+            if (plan.PickupPoint != null)
+            {
+                float radius = Math.Max(DeliveryPointInfo.DefaultInteractionRadius, minRadiusMeters);
+                float dx = playerPosition.X - plan.PickupPoint.InteractionPoint.X;
+                float dz = playerPosition.Z - plan.PickupPoint.InteractionPoint.Z;
+                if (dx * dx + dz * dz <= radius * radius)
+                    return plan.PickupPoint.Id;
+            }
+
+            return string.Empty;
         }
     }
 }

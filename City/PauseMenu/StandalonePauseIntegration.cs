@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
 
@@ -18,15 +19,60 @@ namespace LifeFromZero.City.Pause
         [SerializeField] private Behaviour[] playerInputBehaviours;
         [SerializeField] private GameObject[] competingModalRoots;
         [SerializeField] private Binding[] bindings;
+
+        private readonly List<GameObject> _runtimeCompetingRoots = new List<GameObject>(2);
+        private readonly Dictionary<PauseAction, Action> _runtimeCallbacks = new Dictionary<PauseAction, Action>();
+        private readonly Dictionary<PauseAction, string> _runtimeShortcuts = new Dictionary<PauseAction, string>();
+
         private static bool IsPauseComponent(Behaviour item) =>
             item is PauseController || item is PauseView || item is PauseIntegration ||
             item is PauseDataSource || item.GetType().Name == "PauseKeyboardInput";
+
+        /// <summary>
+        /// Регистрирует runtime-маркер открытого модального окна (телефон/карта UI),
+        /// чтобы Esc закрывал активное окно, а не открывал паузу поверх или в том же кадре.
+        /// </summary>
+        public void RegisterCompetingModalRoot(GameObject modalRoot)
+        {
+            if (modalRoot == null) return;
+            if (!_runtimeCompetingRoots.Contains(modalRoot)) _runtimeCompetingRoots.Add(modalRoot);
+        }
+
+        public void UnregisterCompetingModalRoot(GameObject modalRoot)
+        {
+            if (modalRoot == null) return;
+            _runtimeCompetingRoots.Remove(modalRoot);
+        }
+
+        /// <summary>
+        /// Подключает runtime-обработчик быстрой ссылки паузы (например, Телефон/Карта из LifeFromZero.UI),
+        /// не перезаписывая сериализованные UnityEvent-привязки инспектора.
+        /// </summary>
+        public void SetRuntimeAction(PauseAction action, Action callback, string shortcutLabel = null)
+        {
+            if (callback == null)
+            {
+                _runtimeCallbacks.Remove(action);
+                _runtimeShortcuts.Remove(action);
+                return;
+            }
+            _runtimeCallbacks[action] = callback;
+            if (!string.IsNullOrEmpty(shortcutLabel)) _runtimeShortcuts[action] = shortcutLabel;
+            else _runtimeShortcuts.Remove(action);
+        }
+
         public override bool CanOpenPause()
         {
             if (playerInputBehaviours == null || playerInputBehaviours.Length == 0) return false;
             foreach (var item in playerInputBehaviours) if (item == null || IsPauseComponent(item)) return false;
             if (competingModalRoots != null)
                 foreach (var modal in competingModalRoots) if (modal != null && modal.activeInHierarchy) return false;
+            for (int i = _runtimeCompetingRoots.Count - 1; i >= 0; i--)
+            {
+                var modal = _runtimeCompetingRoots[i];
+                if (modal == null) { _runtimeCompetingRoots.RemoveAt(i); continue; }
+                if (modal.activeInHierarchy) return false;
+            }
             return true;
         }
         public override IDisposable AcquireGameplayLock()
@@ -40,7 +86,7 @@ namespace LifeFromZero.City.Pause
             private bool[] enabled;
             public BehaviourLock(Behaviour[] source)
             {
-                var unique = new System.Collections.Generic.List<Behaviour>(source.Length);
+                var unique = new List<Behaviour>(source.Length);
                 for (int i = 0; i < source.Length; i++)
                 {
                     var item = source[i];
@@ -64,12 +110,27 @@ namespace LifeFromZero.City.Pause
             if (bindings != null) foreach (var b in bindings) if (b != null && b.action == action) return b;
             return null;
         }
+        private static bool HasPersistentBinding(Binding b) =>
+            b != null && b.enabled && b.callback != null && b.callback.GetPersistentEventCount() > 0;
         public override bool IsAvailable(PauseAction action)
         {
             var b = Find(action);
-            return b != null && b.enabled && b.callback != null && b.callback.GetPersistentEventCount() > 0;
+            if (HasPersistentBinding(b)) return true;
+            return _runtimeCallbacks.ContainsKey(action);
         }
-        public override void Execute(PauseAction action) { if (IsAvailable(action)) Find(action).callback.Invoke(); }
-        public override string ShortcutLabel(PauseAction action) { return Find(action)?.existingShortcut; }
+        public override void Execute(PauseAction action)
+        {
+            var b = Find(action);
+            if (HasPersistentBinding(b)) { b.callback.Invoke(); return; }
+            Action runtime;
+            if (_runtimeCallbacks.TryGetValue(action, out runtime) && runtime != null) runtime.Invoke();
+        }
+        public override string ShortcutLabel(PauseAction action)
+        {
+            var b = Find(action);
+            if (b != null && !string.IsNullOrEmpty(b.existingShortcut)) return b.existingShortcut;
+            string shortcut;
+            return _runtimeShortcuts.TryGetValue(action, out shortcut) ? shortcut : null;
+        }
     }
 }

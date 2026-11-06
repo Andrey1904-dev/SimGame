@@ -31,6 +31,8 @@ namespace LifeFromZero.City.Quarter.Tests
             suite.Add("План: повторная сборка отдаёт последний план", RebuildKeepsLatestPlan);
             suite.Add("План: BeginBuild(null) бросает ArgumentNullException", BeginBuildRejectsNull);
             suite.Add("План: новый адаптер не отдаёт план до сборки", EmptySlotHasNoPlan);
+            suite.Add("План: NotifyBuilt рассылает событие PlanChanged подписчикам", NotifyBuiltRaisesPlanChanged);
+            suite.Add("План: Clear рассылает PlanChanged(null) при сбросе непустого слота", ClearRaisesPlanChangedWhenPopulated);
 
             return suite;
         }
@@ -115,6 +117,48 @@ namespace LifeFromZero.City.Quarter.Tests
 
             MiniTestRunner.IsFalse(slot.HasPlan, "новый слот пуст");
             MiniTestRunner.IsTrue(slot.Plan == null, "Plan == null до сборки");
+        }
+
+        private static void NotifyBuiltRaisesPlanChanged()
+        {
+            var slot = new QuarterPlanSlot();
+            INotifyQuarterPlanSource notifier = slot;
+            int callCount = 0;
+            QuarterPlan observed = null;
+            notifier.PlanChanged += p =>
+            {
+                callCount++;
+                observed = p;
+            };
+
+            QuarterPlan plan = DistrictMapGenerator.Generate(1904);
+            slot.BeginBuild(plan);
+            MiniTestRunner.AreEqual(0, callCount, "BeginBuild сам по себе не шлёт событие до завершения сборки геометрии");
+
+            slot.NotifyBuilt();
+            MiniTestRunner.AreEqual(1, callCount, "NotifyBuilt присылает ровно одно уведомление");
+            MiniTestRunner.IsTrue(ReferenceEquals(plan, observed), "в PlanChanged передан собранный план");
+        }
+
+        private static void ClearRaisesPlanChangedWhenPopulated()
+        {
+            var slot = new QuarterPlanSlot();
+            int callCount = 0;
+            QuarterPlan observed = DistrictMapGenerator.Generate(1);
+            slot.PlanChanged += p =>
+            {
+                callCount++;
+                observed = p;
+            };
+
+            // Очистка пустого слота не должна спамить ложными событиями.
+            slot.Clear();
+            MiniTestRunner.AreEqual(0, callCount, "пустой Clear не шлёт PlanChanged");
+
+            slot.BeginBuild(DistrictMapGenerator.Generate(2));
+            slot.Clear();
+            MiniTestRunner.AreEqual(1, callCount, "Clear после сборки шлёт PlanChanged");
+            MiniTestRunner.IsTrue(observed == null, "при сносе района в PlanChanged приходит null");
         }
     }
 }

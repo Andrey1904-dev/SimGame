@@ -10,13 +10,15 @@ sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(_
 from run import compile_to_image
 files = (sorted(glob.glob('UI/Core/*.cs')) + sorted(glob.glob('UI/Runtime/*.cs'))
          + sorted(glob.glob('City/Quarter/*.cs')) + sorted(glob.glob('City/Quarter/DistrictMap/*.cs'))
-         # City.Pause: UI использует существующую паузу проекта. Берём только контракты —
-         # PauseView тянет uGUI, который в стабах не нужен.
-         + ['City/PauseMenu/PauseContracts.cs']
+         # City.Pause: UI использует существующую паузу проекта.
+         + sorted(glob.glob('City/PauseMenu/*.cs'))
          # Jobs.Delivery: чистый C#-модуль, UI подключается к нему мостом телефона.
          + sorted(glob.glob('Jobs/Delivery/*.cs'))
          + ['UI/Tools/unitystubs/UnityStubs.cs'])
-ok, errs, warns, ms = compile_to_image(files)
+for defines in (None, ['ENABLE_INPUT_SYSTEM'], ['ENABLE_LEGACY_INPUT_MANAGER'], ['ENABLE_INPUT_SYSTEM', 'ENABLE_LEGACY_INPUT_MANAGER']):
+    ok, errs, warns, ms = compile_to_image(files, defines=defines)
+    if not ok:
+        break
 seen=set()
 for e in errs[:80]:
     loc = e.Location.GetLineSpan()

@@ -431,8 +431,10 @@ namespace LifeFromZero.Setup
             {
                 string full = files[i];
                 string normalized = full.Replace('\\', '/');
-                // Свои модули не считаем «существующим обработчиком»: пауза сама читает Esc.
+                // Свои модули SimGame не считаем «существующим обработчиком»: пауза и UI сами координируют Esc/P/M.
                 if (normalized.IndexOf("/Assets/City/", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                if (normalized.IndexOf("/Assets/UI/", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                if (normalized.IndexOf("/Assets/_Project/SimGame/", StringComparison.OrdinalIgnoreCase) >= 0) continue;
 
                 string[] lines;
                 try { lines = File.ReadAllLines(full); }

@@ -89,10 +89,17 @@ namespace UnityEngine
         public static float Repeat(float t, float len) => t;
         public static float Sign(float v) => v < 0 ? -1 : 1;
     }
+    public enum FindObjectsInactive { Exclude, Include }
     public class Object {
         public string name;
+        public int GetInstanceID() => 0;
         public static void Destroy(Object o) {}
         public static void DestroyImmediate(Object o) {}
+        public static T FindAnyObjectByType<T>() where T : Object => null;
+        public static T FindFirstObjectByType<T>() where T : Object => null;
+        public static T FindFirstObjectByType<T>(FindObjectsInactive inactive) where T : Object => null;
+        public static T FindObjectOfType<T>() where T : Object => null;
+        public static T[] FindObjectsByType<T>(FindObjectsSortMode mode) where T : Object => new T[0];
         public static bool operator ==(Object a, Object b) => ReferenceEquals(a,b);
         public static bool operator !=(Object a, Object b) => !ReferenceEquals(a,b);
         public override bool Equals(object o) => ReferenceEquals(this,o);
@@ -103,6 +110,8 @@ namespace UnityEngine
         public GameObject() {}
         public GameObject(string n) { name = n; }
         public GameObject(string n, params Type[] t) { name = n; }
+        public static GameObject FindWithTag(string tag) => null;
+        public static GameObject FindGameObjectWithTag(string tag) => null;
         public Transform transform { get; } = new Transform();
         public T AddComponent<T>() where T : Component, new() => new T();
         public Component AddComponent(Type t) => (Component)Activator.CreateInstance(t);
@@ -113,11 +122,13 @@ namespace UnityEngine
         public T GetComponentInParent<T>() => default(T);
         public bool activeInHierarchy => true;
         public bool activeSelf => true;
+        public string tag { get; set; } = "Untagged";
         public void SetActive(bool v) {}
     }
-    public class AudioListener {
+    public class AudioListener : Behaviour {
         public static float volume { get; set; } = 1f;
     }
+    public enum CameraClearFlags { Skybox = 1, Color = 2, SolidColor = 2, Depth = 3, Nothing = 4 }
     public static class Screen {
         public static bool fullScreen { get; set; }
         public static int width => 1920;
@@ -125,15 +136,20 @@ namespace UnityEngine
     }
     public class Camera : Behaviour {
         public static Camera main => null;
-        public Transform transform => gameObject.transform;
+        public new Transform transform => gameObject.transform;
         public bool orthographic { get; set; }
         public float orthographicSize { get; set; }
+        public float nearClipPlane { get; set; }
+        public float farClipPlane { get; set; }
+        public CameraClearFlags clearFlags { get; set; }
+        public Color backgroundColor { get; set; }
     }
     public class Component : Object {
         public T GetComponentInChildren<T>(bool includeInactive = false) => default(T);
         public T[] GetComponentsInChildren<T>(bool includeInactive = false) => new T[0];
         public Component GetComponentInChildren(Type type, bool includeInactive = false) => null;
         public T GetComponentInParent<T>() => default(T);
+        public T[] GetComponents<T>() => new T[0];
         public GameObject gameObject { get; } = new GameObject();
         public Transform transform => gameObject.transform;
         public T GetComponent<T>() where T : Component, new() => new T();
@@ -394,7 +410,7 @@ namespace UnityEngine.EventSystems
 }
 namespace UnityEngine.SceneManagement
 {
-    public struct Scene { public string name { get; set; } public string path { get; set; } public bool IsValid() => true;
+    public struct Scene { public string name { get; set; } public string path { get; set; } public bool isLoaded { get; set; } public bool isDirty { get; set; } public bool IsValid() => true;
         public GameObject[] GetRootGameObjects() => new GameObject[0]; }
     public enum LoadSceneMode { Single, Additive }
     public static class SceneManager {
@@ -402,6 +418,7 @@ namespace UnityEngine.SceneManagement
         public static void LoadScene(string name) {}
         public static void LoadScene(string name, LoadSceneMode mode) {}
         public static Scene GetActiveScene() => new Scene();
+        public static Scene GetSceneByPath(string path) => new Scene();
         public static int sceneCount => 1;
         public static Scene GetSceneAt(int i) => new Scene();
         public static void MoveGameObjectToScene(GameObject go, Scene scene) {}

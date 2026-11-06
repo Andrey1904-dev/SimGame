@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Life From Zero — City/UnityIntegration/run_checks.sh (ТЗ #038)
+# Life From Zero — City/UnityIntegration/run_checks.sh (ТЗ #038 + интеграция UI PR #14 + PR #15)
 #
-# Поэтапные проверки интеграции District750 + Pause Menu.
+# Поэтапные проверки интеграции District750 + Pause Menu + UI + доменных модулей.
 # Каждый этап печатает ровно один итог: PASS / FAIL / NOT RUN.
 # NOT RUN означает «проверка не выполнялась» и НЕ считается успехом.
 #
@@ -11,18 +11,12 @@
 #   bash City/UnityIntegration/run_checks.sh --unity-project "…" --unity "/Applications/Unity/Hub/Editor/6000.3.27f1/Unity.app/Contents/MacOS/Unity"
 #
 # Опции:
-#   --unity-project <path>  Путь к Unity-проекту (нужен для этапов 2, 4, 5, 6).
+#   --unity-project <path>  Путь к Unity-проекту (нужен для этапов 2, 4, 5, 6, 6b).
 #   --unity <path>          Явный путь к бинарнику Unity (иначе ищется в Unity Hub).
-#   --log <path>            Дополнительный лог Unity Console для этапа 6.
+#   --log <path>            Дополнительный лог Unity Console для этапа 7.
 #   --report-dir <path>     Куда писать отчёты (по умолчанию City/UnityIntegration/reports/<время>).
-#   --no-tests              Пропустить этапы 4 и 5 (Unity Test Runner).
+#   --no-tests              Пропустить этапы Unity batchmode (4–6b).
 #   --help                  Эта справка.
-#
-# Ограничения, зашитые в скрипт:
-#   * .NET SDK и Unity не устанавливаются; отсутствие инструмента даёт NOT RUN;
-#   * вторая копия Unity Editor не запускается: если проект открыт (Temp/UnityLockfile),
-#     этапы 4–6 получают NOT RUN;
-#   * отчёты пишутся ВНЕ Assets (по умолчанию City/UnityIntegration/reports).
 #
 # Код завершения: 0 — ни одного FAIL; 1 — есть FAIL; 2 — ошибка аргументов.
 
@@ -54,7 +48,7 @@ while [ "$#" -gt 0 ]; do
             esac
             shift 2 ;;
         --no-tests)      RUN_TESTS="no"; shift ;;
-        --help|-h)       sed -n '2,28p' "$SCRIPT_SOURCE" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --help|-h)       sed -n '2,23p' "$SCRIPT_SOURCE" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) printf 'ОШИБКА: неизвестный аргумент: %s\n' "$1" >&2; exit 2 ;;
     esac
 done
@@ -74,20 +68,19 @@ NOTRUN=0
 PASSES=0
 
 record() {
-    # $1 = статус, $2 = номер этапа, $3 = имя, $4 = деталь
     local status="$1" num="$2" name="$3" detail="${4:-}"
     printf '[%s] Этап %s. %s%s\n' "$status" "$num" "$name" "${detail:+ — $detail}"
     printf '%s\t%s\t%s\t%s\n' "$status" "$num" "$name" "$detail" >>"$SUMMARY_FILE"
     case "$status" in
-        PASS)    PASSES=$((PASSES + 1)) ;;
-        FAIL)    FAILS=$((FAILS + 1)) ;;
+        PASS)     PASSES=$((PASSES + 1)) ;;
+        FAIL)     FAILS=$((FAILS + 1)) ;;
         NOT\ RUN) NOTRUN=$((NOTRUN + 1)) ;;
     esac
 }
 
 section() { printf '\n--- %s\n' "$*"; }
 
-printf 'Life From Zero — проверки интеграции (ТЗ #038)\n'
+printf 'Life From Zero — проверки интеграции (District750 + Pause + UI)\n'
 printf 'Репозиторий: %s\nОтчёты: %s\n' "$REPO_ROOT" "$REPORT_DIR"
 
 if [ -n "$UNITY_PROJECT" ]; then
@@ -96,101 +89,140 @@ if [ -n "$UNITY_PROJECT" ]; then
 fi
 
 # =====================================================================
-section "Этап 1. Python-генератор District750"
+section "Этап 1. Статические проверки репозитория (District750 + граф .asmdef + документация)"
 if ! command -v python3 >/dev/null 2>&1; then
-    record "NOT RUN" 1 "Python-генератор District750" "python3 не найден в PATH"
-elif [ ! -f "$REPO_ROOT/City/Tools/district_layout_check.py" ]; then
-    record "NOT RUN" 1 "Python-генератор District750" "нет City/Tools/district_layout_check.py"
+    record "NOT RUN" 1 "Статические проверки репозитория" "python3 не найден в PATH"
 else
-    LOG1="$REPORT_DIR/stage1-district_layout.log"
-    if ( cd "$REPO_ROOT" && python3 City/Tools/district_layout_check.py ) >"$LOG1" 2>&1; then
+    LOG1="$REPORT_DIR/stage1-static.log"
+    if (
+        cd "$REPO_ROOT" &&
+        python3 City/Tools/district_layout_check.py &&
+        python3 AUDIT/tools/check_asmdef_graph.py &&
+        python3 AUDIT/tools/check_docs_consistency.py
+    ) >"$LOG1" 2>&1; then
         objects=$(grep -m 1 '^objects' "$LOG1" | awk '{print $2}')
         deliveries=$(grep -m 1 '^deliveries' "$LOG1" | awk '{print $2}')
         unreachable=$(grep -m 1 '^unreachable' "$LOG1" | awk '{print $2}')
         home=$(grep -m 1 '^player_home' "$LOG1" | sed 's/^player_home[[:space:]]*//')
-        record "PASS" 1 "Python-генератор District750" "objects=$objects deliveries=$deliveries unreachable=$unreachable; квартира №67: $home"
+        record "PASS" 1 "Статические проверки репозитория" "objects=$objects deliveries=$deliveries unreachable=$unreachable; asmdef=OK; docs=OK; дом: $home"
     else
-        record "FAIL" 1 "Python-генератор District750" "см. $(basename "$LOG1")"
+        record "FAIL" 1 "Статические проверки репозитория" "см. $(basename "$LOG1")"
     fi
 fi
 
 # =====================================================================
-section "Этап 2. Структура Unity-проекта"
+section "Этап 2. Структура Unity-проекта и отсутствие дубликатов .asmdef"
 if [ -z "$UNITY_PROJECT" ]; then
     record "NOT RUN" 2 "Структура Unity-проекта" "не передан --unity-project"
 elif [ ! -d "$UNITY_PROJECT/Assets" ] || [ ! -d "$UNITY_PROJECT/ProjectSettings" ]; then
     record "FAIL" 2 "Структура Unity-проекта" "нет Assets/ или ProjectSettings/ в $UNITY_PROJECT"
 else
     LOG2="$REPORT_DIR/stage2-project-structure.log"
-    : >"$LOG2"
-    missing=0
-    total=0
-    for rel in \
-        "Assets/City/Quarter/City.Quarter.asmdef" \
-        "Assets/City/Quarter/QuarterGenerator.cs" \
-        "Assets/City/Quarter/DistrictMap/DistrictMapGenerator.cs" \
-        "Assets/City/UnityAdapter/City.Quarter.UnityAdapter.asmdef" \
-        "Assets/City/UnityAdapter/CityBootstrap.cs" \
-        "Assets/City/UnityAdapter/QuarterUnityAdapter.cs" \
-        "Assets/City/Tests/City.Quarter.Tests.asmdef" \
-        "Assets/City/PauseMenu/LifeFromZero.City.Pause.asmdef" \
-        "Assets/City/PauseMenu/PauseController.cs" \
-        "Assets/City/PauseMenu/PauseView.cs" \
-        "Assets/City/PauseMenu/PauseContracts.cs" \
-        "Assets/City/PauseMenu/StandalonePauseIntegration.cs" \
-        "Assets/City/PauseInputSystem/PauseKeyboardInput.cs" \
-        "Assets/City/PauseTests/LifeFromZero.City.Pause.Tests.asmdef" \
-        "Assets/City/PauseTests/PauseTests.cs" \
-        "Assets/City/UnityIntegration/Editor/LifeFromZeroSetup.cs" \
-        "Assets/City/UnityIntegration/Editor/LifeFromZeroDiscovery.cs" \
-        "Assets/City/UnityIntegration/Editor/LifeFromZeroGameIntegration.cs" \
-        "Assets/City/UnityIntegration/Editor/LifeFromZeroIntegrateWindow.cs" \
-        "Assets/City/UnityIntegration/Editor/LifeFromZeroMigration.cs" \
-        "Assets/City/UnityIntegration/Runtime/District750Link.cs" \
-        "Assets/City/UnityIntegration/Runtime/PlayerHomeAnchor.cs" ; do
-        total=$((total + 1))
-        if [ -f "$UNITY_PROJECT/$rel" ]; then
-            printf 'OK   %s\n' "$rel" >>"$LOG2"
-        else
-            printf 'MISS %s\n' "$rel" >>"$LOG2"
-            missing=$((missing + 1))
-        fi
-    done
-    if [ -f "$UNITY_PROJECT/ProjectSettings/ProjectVersion.txt" ]; then
-        printf 'VERSION %s\n' "$(head -n 1 "$UNITY_PROJECT/ProjectSettings/ProjectVersion.txt")" >>"$LOG2"
-    fi
-    # .meta появляются после импорта в Unity — их отсутствие до открытия Editor не ошибка.
-    meta_missing=0
-    while IFS= read -r f; do
-        [ -n "$f" ] || continue
-        [ -f "$f.meta" ] || meta_missing=$((meta_missing + 1))
-    done <<EOF
-$(find "$UNITY_PROJECT/Assets/City" -name '*.cs' 2>/dev/null)
-EOF
-    if [ "$missing" -eq 0 ]; then
-        record "PASS" 2 "Структура Unity-проекта" "все $total файлов на месте; .cs без .meta: $meta_missing (Unity создаст при импорте)"
+    if python3 - "$UNITY_PROJECT" >"$LOG2" 2>&1 <<'PY'
+import glob, json, os, sys
+root = sys.argv[1]
+assets = os.path.join(root, "Assets")
+
+required_asmdefs = [
+    "LifeFromZero.City.Quarter",
+    "LifeFromZero.City.Quarter.UnityAdapter",
+    "LifeFromZero.City.Pause",
+    "LifeFromZero.UI.Core",
+    "LifeFromZero.UI",
+    "LifeFromZero.UI.Editor",
+    "LifeFromZero.Economy",
+    "LifeFromZero.Jobs.Delivery",
+    "LifeFromZero.Phone",
+    "LifeFromZero.Debts",
+]
+required_files = [
+    "PauseKeyboardInput.cs",
+    "LifeFromZeroSetup.cs",
+    "LifeFromZeroDiscovery.cs",
+    "LifeFromZeroGameIntegration.cs",
+    "District750Link.cs",
+    "PlayerHomeAnchor.cs",
+    "UiInstaller.cs",
+    "QuarterLocationProvider.cs",
+    "AdapterBridges.cs",
+    "PhoneUiBridge.cs",
+]
+
+by_asm = {}
+for p in sorted(glob.glob(os.path.join(assets, "**/*.asmdef"), recursive=True)):
+    name = json.load(open(p, encoding="utf-8")).get("name", "")
+    if name:
+        by_asm.setdefault(name, []).append(os.path.relpath(p, root))
+
+errors = []
+for name, paths in sorted(by_asm.items()):
+    if len(paths) > 1:
+        errors.append(f"DUPLICATE_ASMDEF {name}: {paths}")
+for req in required_asmdefs:
+    if req not in by_asm:
+        errors.append(f"MISSING_ASMDEF {req}")
+    else:
+        print(f"OK_ASMDEF {req} -> {by_asm[req][0]}")
+
+all_cs = {os.path.basename(p): os.path.relpath(p, root) for p in glob.glob(os.path.join(assets, "**/*.cs"), recursive=True)}
+for rf in required_files:
+    if rf not in all_cs:
+        errors.append(f"MISSING_FILE {rf}")
+    else:
+        print(f"OK_FILE {rf} -> {all_cs[rf]}")
+
+for bad in ("UI/Tools", "City/Tools"):
+    if os.path.isdir(os.path.join(assets, bad)):
+        errors.append(f"FORBIDDEN_DIR Assets/{bad}")
+
+if errors:
+    for e in errors:
+        print("ERR", e)
+    sys.exit(1)
+print(f"SUMMARY asmdefs={len(by_asm)} required_ok={len(required_asmdefs)} files_ok={len(required_files)}")
+PY
+    then
+        summary_line=$(grep '^SUMMARY ' "$LOG2" | tail -n 1)
+        record "PASS" 2 "Структура Unity-проекта" "$summary_line"
     else
-        record "FAIL" 2 "Структура Unity-проекта" "отсутствует файлов: $missing (см. $(basename "$LOG2"))"
+        record "FAIL" 2 "Структура Unity-проекта" "см. $(basename "$LOG2")"
     fi
 fi
 
 # =====================================================================
-section "Этап 3. C# build (dotnet)"
-if ! command -v dotnet >/dev/null 2>&1; then
-    record "NOT RUN" 3 "C# build через dotnet" "dotnet не найден в PATH (SDK не устанавливаем)"
-elif [ ! -f "$REPO_ROOT/City/Tests/Console.csproj" ]; then
-    record "NOT RUN" 3 "C# build через dotnet" "нет City/Tests/Console.csproj"
-else
+section "Этап 3. Внедвижковая C#-компиляция (dotnet / Roslyn)"
+PYTHON_ROSLYN=""
+if [ -x "/tmp/pyvenv/bin/python3" ]; then
+    PYTHON_ROSLYN="/tmp/pyvenv/bin/python3"
+elif command -v python3 >/dev/null 2>&1 && python3 -c "import clr_loader" >/dev/null 2>&1; then
+    PYTHON_ROSLYN="python3"
+fi
+
+if [ -n "$PYTHON_ROSLYN" ] && [ -f "$REPO_ROOT/AUDIT/tools/check_unity6_compile.py" ]; then
+    LOG3="$REPORT_DIR/stage3-roslyn-unity6.log"
+    if (
+        cd "$REPO_ROOT" &&
+        "$PYTHON_ROSLYN" AUDIT/tools/check_unity6_compile.py &&
+        "$PYTHON_ROSLYN" UI/Tools/checkui.py &&
+        "$PYTHON_ROSLYN" UI/Tools/checkeditor.py &&
+        "$PYTHON_ROSLYN" UI/Tools/runtests.py
+    ) >"$LOG3" 2>&1; then
+        record "PASS" 3 "Внедвижковая C#-компиляция (Roslyn Unity 6)" "17 .asmdef + Assembly-CSharp + Assembly-CSharp-Editor + UI tests: 0 ошибок"
+    else
+        record "FAIL" 3 "Внедвижковая C#-компиляция (Roslyn Unity 6)" "см. $(basename "$LOG3")"
+    fi
+elif command -v dotnet >/dev/null 2>&1 && [ -f "$REPO_ROOT/City/Tests/Console.csproj" ]; then
     LOG3="$REPORT_DIR/stage3-dotnet-build.log"
     if ( cd "$REPO_ROOT" && dotnet build City/Tests/Console.csproj --nologo ) >"$LOG3" 2>&1; then
         record "PASS" 3 "C# build через dotnet" "сборка City/Tests/Console.csproj успешна"
     else
         record "FAIL" 3 "C# build через dotnet" "см. $(basename "$LOG3")"
     fi
+else
+    record "NOT RUN" 3 "Внедвижковая C#-компиляция" "ни dotnet SDK, ни pythonnet/Roslyn не найдены в окружении"
 fi
 
 # =====================================================================
-# Поиск Unity
 find_unity() {
     if [ -n "$UNITY_BIN_ARG" ]; then
         [ -x "$UNITY_BIN_ARG" ] && { printf '%s' "$UNITY_BIN_ARG"; return 0; }
@@ -209,11 +241,7 @@ find_unity() {
 }
 
 UNITY_BIN=""
-if UNITY_BIN="$(find_unity)"; then
-    : # найден
-else
-    UNITY_BIN=""
-fi
+if UNITY_BIN="$(find_unity)"; then :; else UNITY_BIN=""; fi
 
 unity_blocked_reason() {
     if [ -z "$UNITY_PROJECT" ]; then printf 'не передан --unity-project'; return 0; fi
@@ -252,34 +280,35 @@ run_unity_tests() {
 }
 
 # =====================================================================
-section "Этап 4. EditMode-тесты города"
-run_unity_tests "EditMode" 4 "EditMode-тесты города"
+section "Этап 4. EditMode-тесты (City + UI)"
+run_unity_tests "EditMode" 4 "EditMode-тесты (City + UI)"
 
 # =====================================================================
 section "Этап 5. PlayMode-тесты меню паузы"
 run_unity_tests "PlayMode" 5 "PlayMode-тесты меню паузы"
 
 # =====================================================================
-section "Этап 6. Обнаружение стартовой сцены (ТЗ #039)"
+section "Этап 6. Обнаружение стартовой сцены и read-only диагностика UI"
 if [ "$RUN_TESTS" != "yes" ]; then
-    record "NOT RUN" 6 "Обнаружение стартовой сцены" "отключено флагом --no-tests"
+    record "NOT RUN" 6 "Обнаружение сцен и проверка UI" "отключено флагом --no-tests"
 else
     reason="$(unity_blocked_reason)"
     if [ -n "$reason" ]; then
-        record "NOT RUN" 6 "Обнаружение стартовой сцены" "$reason"
+        record "NOT RUN" 6 "Обнаружение сцен и проверка UI" "$reason"
     else
         LOG6D="$REPORT_DIR/stage6-detect.log"
+        LOG6U="$REPORT_DIR/stage6-ui-verify.log"
         if "$UNITY_BIN" -batchmode -quit -projectPath "$UNITY_PROJECT" \
             -executeMethod LifeFromZero.Setup.LifeFromZeroDiscovery.DetectBatch \
-            -logFile "$LOG6D" >/dev/null 2>&1; then
-            if grep -q "RESULT: OK report=" "$LOG6D" 2>/dev/null; then
-                chosen="$(grep -o "Стартовая сцена: .*" "$LOG6D" 2>/dev/null | head -n 1)"
-                record "PASS" 6 "Обнаружение стартовой сцены" "${chosen:-см. stage6-detect.log}"
-            else
-                record "FAIL" 6 "Обнаружение стартовой сцены" "нет строки RESULT (см. stage6-detect.log)"
-            fi
+            -logFile "$LOG6D" >/dev/null 2>&1 &&
+           "$UNITY_BIN" -batchmode -quit -projectPath "$UNITY_PROJECT" \
+            -executeMethod LifeFromZero.UI.Editor.UiInstaller.RunBatchVerify \
+            -logFile "$LOG6U" >/dev/null 2>&1; then
+            chosen="$(grep -o "Стартовая сцена: .*" "$LOG6D" 2>/dev/null | head -n 1)"
+            ui_summary="$(grep -o "BATCH_VERIFY scenes=.*" "$LOG6U" 2>/dev/null | head -n 1)"
+            record "PASS" 6 "Обнаружение сцен и проверка UI" "${chosen:-detect=OK}; ${ui_summary:-ui_verify=OK}"
         else
-            record "FAIL" 6 "Обнаружение стартовой сцены" "Unity завершился с ошибкой (см. stage6-detect.log)"
+            record "FAIL" 6 "Обнаружение сцен и проверка UI" "см. stage6-detect.log / stage6-ui-verify.log"
         fi
     fi
 fi
@@ -289,7 +318,7 @@ section "Этап 7. Критические ошибки Unity Console"
 LOG7="$REPORT_DIR/stage7-console-scan.log"
 : >"$LOG7"
 scan_targets=""
-for f in "$REPORT_DIR"/stage4-*.log "$REPORT_DIR"/stage5-*.log "$REPORT_DIR"/stage6-detect.log; do
+for f in "$REPORT_DIR"/stage4-*.log "$REPORT_DIR"/stage5-*.log "$REPORT_DIR"/stage6-*.log; do
     [ -f "$f" ] && scan_targets="$scan_targets$f
 "
 done
@@ -346,7 +375,7 @@ printf '\n================ ИТОГ ================\n'
 printf 'PASS: %s   FAIL: %s   NOT RUN: %s\n' "$PASSES" "$FAILS" "$NOTRUN"
 printf 'Отчёт: %s\n' "$REPORT_MD"
 if [ "$NOTRUN" -gt 0 ]; then
-    printf 'ВНИМАНИЕ: NOT RUN — это НЕ успешная проверка. Незапущенные этапы нужно выполнить вручную.\n'
+    printf 'ВНИМАНИЕ: NOT RUN — это НЕ успешная проверка. Незапущенные этапы нужно выполнить в локальном Unity 6000.3.27f1.\n'
 fi
 [ "$FAILS" -gt 0 ] && exit 1
 exit 0

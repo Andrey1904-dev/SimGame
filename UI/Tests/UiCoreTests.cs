@@ -1351,6 +1351,71 @@ namespace LifeFromZero.UI.Tests
                 UiAssert.Null(navigation.ActiveRoute, "маршрут снят вместе с заказом");
                 UiAssert.Null(navigation.Waypoints.FindOrder("order-1"), "метка заказа удалена");
             });
+
+            suite.Add("Район: TryGetDeliveryPosition разрешает алиасы ПВЗ и дома №67", () =>
+            {
+                QuarterPlan plan = DistrictMapGenerator.Generate(1904);
+                MapPoint pvzDirect;
+                MapPoint pvzDrop;
+                UiAssert.True(QuarterPlanAdapter.TryGetDeliveryPosition(plan, "pvz-01", out pvzDirect), "алиас pvz-01 найден");
+                UiAssert.True(QuarterPlanAdapter.TryGetDeliveryPosition(plan, "drop-pvz-01", out pvzDrop), "точка drop-pvz-01 найдена");
+                UiAssert.Near(pvzDrop.X, pvzDirect.X, 0.01f, "X ПВЗ совпадает");
+                UiAssert.Near(pvzDrop.Z, pvzDirect.Z, 0.01f, "Z ПВЗ совпадает");
+
+                MapPoint homeByBuilding;
+                MapPoint homeByAlias;
+                MapPoint homeExit;
+                UiAssert.True(QuarterPlanAdapter.TryGetDeliveryPosition(plan, plan.PlayerHome.BuildingId, out homeByBuilding), "дом по BuildingId найден");
+                UiAssert.True(QuarterPlanAdapter.TryGetDeliveryPosition(plan, "player.home", out homeByAlias), "дом по player.home найден");
+                UiAssert.Near(plan.PlayerHome.EntranceDoor.X, homeByAlias.X, 0.01f, "X двери подъезда №67");
+                UiAssert.Near(plan.PlayerHome.EntranceDoor.Z, homeByAlias.Z, 0.01f, "Z двери подъезда №67");
+                UiAssert.True(QuarterPlanAdapter.TryGetDeliveryPosition(plan, "player.home.exit", out homeExit), "выход player.home.exit найден");
+                UiAssert.Near(plan.PlayerHome.CourtyardExit.Z, homeExit.Z, 0.01f, "Z выхода во двор №67");
+            });
+
+            suite.Add("Район: ResolveLocationId определяет точку плана по мировым координатам и радиусу", () =>
+            {
+                QuarterPlan plan = DistrictMapGenerator.Generate(1904);
+                MapPoint pvzPos;
+                UiAssert.True(QuarterPlanAdapter.TryGetDeliveryPosition(plan, "pvz-01", out pvzPos), "координаты ПВЗ получены");
+
+                string nearPvz = QuarterPlanAdapter.ResolveLocationId(plan, new MapPoint(pvzPos.X + 1.5f, pvzPos.Z - 1.0f), 6f);
+                UiAssert.True(!string.IsNullOrEmpty(nearPvz), "рядом с ПВЗ локация распознана");
+
+                string farAway = QuarterPlanAdapter.ResolveLocationId(plan, new MapPoint(-500f, -500f), 6f);
+                UiAssert.Equal(string.Empty, farAway, "вне радиуса возвращается пустая строка");
+            });
+
+            suite.Add("Телефон: PhoneAppIds.Normalize связывает jobs из PhoneFacade с экраном заказов", () =>
+            {
+                UiAssert.Equal(PhoneAppIds.Orders, PhoneAppIds.Normalize("jobs"), "jobs -> orders");
+                UiAssert.Equal(PhoneAppIds.Orders, PhoneAppIds.Normalize("  JOBS "), "регистр и пробелы нормализуются");
+                UiAssert.Equal(PhoneAppIds.Messages, PhoneAppIds.Normalize("messages"), "messages остаётся messages");
+                UiAssert.Equal(string.Empty, PhoneAppIds.Normalize(null), "null -> пустая строка");
+            });
+
+            suite.Add("Навигация: двухэтапный маршрут курьера ведёт сначала к ПВЗ, затем к клиенту", () =>
+            {
+                QuarterPlan plan = DistrictMapGenerator.Generate(1904);
+                QuarterPlanMapData data = QuarterPlanAdapter.Build(plan);
+                var navigation = new NavigationService();
+                navigation.SetGraph(data.Graph);
+
+                MapPoint player = new MapPoint(plan.PlayerHome.CourtyardExit.X, plan.PlayerHome.CourtyardExit.Z);
+                MapPoint pickup;
+                UiAssert.True(QuarterPlanAdapter.TryGetDeliveryPosition(plan, "pvz-01", out pickup), "точка ПВЗ");
+                MapPoint dropoff = new MapPoint(plan.DeliveryPoints[5].Position.X, plan.DeliveryPoints[5].Position.Z);
+
+                Waypoint w1 = navigation.Waypoints.SetOrder("ord-42", pickup, "Забрать: ПВЗ");
+                NavigationOutcome leg1 = navigation.NavigateTo(w1, player);
+                UiAssert.True(leg1.Ok, "маршрут до ПВЗ построен");
+                UiAssert.Equal("Забрать: ПВЗ", navigation.ActiveRoute.DestinationLabel, "первое плечо — ПВЗ");
+
+                Waypoint w2 = navigation.Waypoints.SetOrder("ord-42", dropoff, "Доставить: подъезд");
+                NavigationOutcome leg2 = navigation.NavigateTo(w2, pickup);
+                UiAssert.True(leg2.Ok, "маршрут от ПВЗ к клиенту построен");
+                UiAssert.Equal("Доставить: подъезд", navigation.ActiveRoute.DestinationLabel, "второе плечо — клиент");
+            });
         }
     }
 }

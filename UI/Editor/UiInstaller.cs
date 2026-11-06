@@ -124,6 +124,39 @@ namespace LifeFromZero.UI.Editor
             EditorUtility.DisplayDialog("Life From Zero UI (проверка)", result.ToText(), "OK");
         }
 
+        [MenuItem("Tools/Life From Zero/UI/Verify Scenes & Adapters (read-only)", false, 42)]
+        public static void VerifyScenesFromMenu()
+        {
+            string report = BuildScenesVerificationReport(out int issues);
+            Debug.Log(LogTag + " Проверка сцен (issues=" + issues + "):\n" + report);
+            EditorUtility.DisplayDialog("Life From Zero UI — диагностика сцен", report, "OK");
+        }
+
+        /// <summary>
+        /// Пакетная проверка компиляции и связей сцен (Apartment67, District750, Build Settings)
+        /// БЕЗ сохранения и перезаписи ассетов. Вызывается через Unity -batchmode -executeMethod.
+        /// </summary>
+        public static void RunBatchVerify()
+        {
+            string report = BuildScenesVerificationReport(out int issues);
+            try
+            {
+                string projectRoot = Directory.GetParent(Application.dataPath).FullName;
+                string dir = Path.Combine(projectRoot, "LifeFromZeroIntegration", "reports");
+                Directory.CreateDirectory(dir);
+                string outPath = Path.Combine(dir, "ui_scene_verify.md");
+                File.WriteAllText(outPath, report);
+                Debug.Log(LogTag + " Отчёт проверки записан: " + outPath + "\n" + report);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError(LogTag + " Не удалось записать отчёт: " + exception.Message);
+            }
+
+            if (issues > 0 && HasArgument("-lfzStrictVerify"))
+                Fail("найдены незакрытые блокеры сцен: " + issues);
+        }
+
         /// <summary>Точка входа для Unity -batchmode -executeMethod.</summary>
         public static void InstallBatch()
         {
@@ -210,9 +243,23 @@ namespace LifeFromZero.UI.Editor
                     result.Changes.Add("создан экран " + screen.Name);
                 }
 
+                if (FindByType<QuarterLocationProvider>(scene) == null)
+                {
+                    result.Changes.Add("добавлен адаптер геопозиции доставки QuarterLocationProvider");
+                }
+                else
+                {
+                    result.AlreadyDone.Add("QuarterLocationProvider уже есть");
+                }
+
+                if (NeedsAdapterWiring(scene, root))
+                {
+                    result.Changes.Add("связаны сериализованные поля Inspector между UiBootstrap, мостами и сценой");
+                }
+
                 if (FindByType<UnityEngine.EventSystems.EventSystem>(scene) == null)
                 {
-                    result.Changes.Add("создан EventSystem (иначе кнопки uGUI не нажимаются)");
+                    result.Changes.Add("создан EventSystem (InputSystemUIInputModule / StandaloneInputModule)");
                 }
 
                 AddManualSteps(result);
@@ -237,14 +284,15 @@ namespace LifeFromZero.UI.Editor
                         SceneManager.MoveGameObjectToScene(root, scene);
                     }
 
-                    if (root.GetComponent<UiBootstrap>() == null) root.AddComponent<UiBootstrap>();
+                    var bootstrap = root.GetComponent<UiBootstrap>() ?? root.AddComponent<UiBootstrap>();
 
                     // Мост к существующим системам: позиция игрока (камера) и, если в
                     // сцене есть City.Pause, — источник данных и передача действий.
-                    if (root.GetComponent<UiGameBridge>() == null) root.AddComponent<UiGameBridge>();
-                    if (root.GetComponent<PauseUiSnapshotSource>() == null) root.AddComponent<PauseUiSnapshotSource>();
-                    if (root.GetComponent<DeliveryServiceBridge>() == null) root.AddComponent<DeliveryServiceBridge>();
-                    if (root.GetComponent<UiMenuActions>() == null) root.AddComponent<UiMenuActions>();
+                    var bridge = root.GetComponent<UiGameBridge>() ?? root.AddComponent<UiGameBridge>();
+                    var pauseSnapshot = root.GetComponent<PauseUiSnapshotSource>() ?? root.AddComponent<PauseUiSnapshotSource>();
+                    var deliveryBridge = root.GetComponent<DeliveryServiceBridge>() ?? root.AddComponent<DeliveryServiceBridge>();
+                    var locationProvider = root.GetComponent<QuarterLocationProvider>() ?? root.AddComponent<QuarterLocationProvider>();
+                    var menuActions = root.GetComponent<UiMenuActions>() ?? root.AddComponent<UiMenuActions>();
 
                     // UiBootstrap сам создаёт экраны в Awake, но если проект запускает
                     // интерфейс из кода (UiBootstrap.Ensure) — экраны всё равно нужны.
@@ -254,13 +302,15 @@ namespace LifeFromZero.UI.Editor
                     AddScreen<MapScreen>(root, "Map");
                     AddScreen<PauseMenuScreen>(root, "Pause Menu");
 
+                    WireSceneReferences(scene, bootstrap, bridge, pauseSnapshot, deliveryBridge, locationProvider, menuActions);
+
                     if (FindByType<UnityEngine.EventSystems.EventSystem>(scene) == null &&
                         !HasEventSystemInScene(scene))
                     {
                         var eventSystem = new GameObject("EventSystem");
                         SceneManager.MoveGameObjectToScene(eventSystem, scene);
                         eventSystem.AddComponent<UnityEngine.EventSystems.EventSystem>();
-                        eventSystem.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+                        AddPreferredInputModule(eventSystem);
                     }
 
                     EditorSceneManager.MarkSceneDirty(scene);
@@ -336,6 +386,238 @@ namespace LifeFromZero.UI.Editor
                     if (name == "PauseController") return new Package { Hint = "PauseController найден" };
                     if (name == "StandalonePauseIntegration") return new Package { Hint = "StandalonePauseIntegration найден" };
                     if (name == "PauseKeyboardInput") return new Package { Hint = "PauseKeyboardInput найден" };
+                }
+            }
+            return null;
+        }
+
+        private static void AddPreferredInputModule(GameObject eventSystemGo)
+        {
+            Type inputSystemUiType = Type.GetType("UnityEngine.InputSystem.UI.InputSystemUIInputModule, Unity.InputSystem");
+            if (inputSystemUiType != null && typeof(Component).IsAssignableFrom(inputSystemUiType))
+            {
+                eventSystemGo.AddComponent(inputSystemUiType);
+                return;
+            }
+            eventSystemGo.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+        }
+
+        private static bool NeedsAdapterWiring(Scene scene, GameObject root)
+        {
+            if (root == null) return true;
+            var bootstrap = root.GetComponent<UiBootstrap>();
+            var delivery = root.GetComponent<DeliveryServiceBridge>();
+            var location = root.GetComponent<QuarterLocationProvider>();
+            if (bootstrap == null || delivery == null || location == null) return true;
+
+            return IsPropertyNull(bootstrap, "worldAdapter") ||
+                   IsPropertyNull(bootstrap, "snapshotSource") ||
+                   IsPropertyNull(bootstrap, "deliverySystem") ||
+                   IsPropertyNull(delivery, "locationProvider") ||
+                   IsPropertyNull(delivery, "walletSource") ||
+                   (FindInterfaceBehaviour<LifeFromZero.City.Quarter.IQuarterPlanSource>(scene) != null &&
+                    IsPropertyNull(bootstrap, "districtSource"));
+        }
+
+        private static bool IsPropertyNull(UnityEngine.Object target, string propertyName)
+        {
+            if (target == null) return true;
+            var so = new SerializedObject(target);
+            SerializedProperty prop = so.FindProperty(propertyName);
+            return prop != null && prop.objectReferenceValue == null;
+        }
+
+        private static void SetIfNull(SerializedObject so, string propertyName, UnityEngine.Object value)
+        {
+            if (value == null) return;
+            SerializedProperty prop = so.FindProperty(propertyName);
+            if (prop != null && prop.objectReferenceValue == null)
+                prop.objectReferenceValue = value;
+        }
+
+        private static void WireSceneReferences(
+            Scene scene,
+            UiBootstrap bootstrap,
+            UiGameBridge bridge,
+            PauseUiSnapshotSource pauseSnapshot,
+            DeliveryServiceBridge deliveryBridge,
+            QuarterLocationProvider locationProvider,
+            UiMenuActions menuActions)
+        {
+            MonoBehaviour districtSource = FindInterfaceBehaviour<LifeFromZero.City.Quarter.IQuarterPlanSource>(scene);
+            var existingPause = FindByType<LifeFromZero.City.Pause.PauseIntegration>(scene);
+            var pauseData = FindByType<LifeFromZero.City.Pause.PauseDataSource>(scene);
+            var deliveryHost = FindByType<DeliveryServiceHost>(scene);
+            MonoBehaviour clockAdapter = FindInterfaceBehaviour<LifeFromZero.Jobs.Delivery.IGameClockAdapter>(scene);
+            MonoBehaviour payoutAdapter = FindInterfaceBehaviour<LifeFromZero.Jobs.Delivery.IPayoutAdapter>(scene);
+
+            if (bootstrap != null)
+            {
+                var so = new SerializedObject(bootstrap);
+                SetIfNull(so, "worldAdapter", bridge);
+                SetIfNull(so, "snapshotSource", pauseSnapshot);
+                SetIfNull(so, "deliverySystem", deliveryBridge);
+                SetIfNull(so, "districtSource", districtSource);
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
+
+            if (bridge != null)
+            {
+                var so = new SerializedObject(bridge);
+                SetIfNull(so, "existingPause", existingPause);
+                SetIfNull(so, "menuActions", menuActions);
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
+
+            if (pauseSnapshot != null)
+            {
+                var so = new SerializedObject(pauseSnapshot);
+                SetIfNull(so, "dataSource", pauseData);
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
+
+            if (locationProvider != null)
+            {
+                var so = new SerializedObject(locationProvider);
+                SetIfNull(so, "worldAdapter", bridge);
+                SetIfNull(so, "districtSource", districtSource);
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
+
+            if (deliveryBridge != null)
+            {
+                var so = new SerializedObject(deliveryBridge);
+                SetIfNull(so, "locationProvider", locationProvider);
+                SetIfNull(so, "walletSource", pauseSnapshot);
+                SetIfNull(so, "districtSource", districtSource);
+                SetIfNull(so, "deliveryServiceSource", deliveryHost);
+                SetIfNull(so, "clockAdapter", clockAdapter);
+                SetIfNull(so, "payoutAdapter", payoutAdapter);
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
+        }
+
+        private static MonoBehaviour FindInterfaceBehaviour<TInterface>(Scene scene) where TInterface : class
+        {
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                foreach (MonoBehaviour mb in root.GetComponentsInChildren<MonoBehaviour>(true))
+                {
+                    if (mb != null && mb is TInterface) return mb;
+                }
+            }
+            return null;
+        }
+
+        private static string BuildScenesVerificationReport(out int issueCount)
+        {
+            issueCount = 0;
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("# Life From Zero — проверка компиляции и связей сцен (Unity)");
+            sb.AppendLine();
+
+            var candidatePaths = new List<string>();
+            EditorBuildSettingsScene[] buildScenes = EditorBuildSettings.scenes;
+            if (buildScenes != null && buildScenes.Length > 0)
+            {
+                sb.AppendLine("## Build Settings");
+                for (int i = 0; i < buildScenes.Length; i++)
+                {
+                    EditorBuildSettingsScene s = buildScenes[i];
+                    sb.AppendLine("- [" + (s.enabled ? "x" : " ") + "] `" + s.path + "`");
+                    if (s.enabled && !string.IsNullOrEmpty(s.path) && File.Exists(s.path) &&
+                        !candidatePaths.Contains(s.path))
+                    {
+                        candidatePaths.Add(s.path);
+                    }
+                }
+                sb.AppendLine();
+            }
+            else
+            {
+                sb.AppendLine("- [WARN] Build Settings пуст — переходы между Apartment67 и District750 требуют включения обеих сцен.");
+                issueCount++;
+            }
+
+            string startScene;
+            if (TryResolveScene(out startScene) && !candidatePaths.Contains(startScene))
+                candidatePaths.Insert(0, startScene);
+
+            string defaultDistrict = "Assets/_Project/Scenes/District750.unity";
+            if (File.Exists(defaultDistrict) && !candidatePaths.Contains(defaultDistrict))
+                candidatePaths.Add(defaultDistrict);
+
+            for (int i = 0; i < candidatePaths.Count; i++)
+            {
+                string path = candidatePaths[i];
+                sb.AppendLine("## Сцена `" + path + "`");
+                if (!File.Exists(path))
+                {
+                    sb.AppendLine("- [FAIL] Файл сцены не найден.");
+                    issueCount++;
+                    continue;
+                }
+
+                Scene scene;
+                try
+                {
+                    scene = EditorSceneManager.OpenScene(path, OpenSceneMode.Additive);
+                }
+                catch (Exception ex)
+                {
+                    sb.AppendLine("- [FAIL] Ошибка открытия: " + ex.Message);
+                    issueCount++;
+                    continue;
+                }
+
+                try
+                {
+                    var uiBootstrap = FindByType<UiBootstrap>(scene);
+                    var eventSystem = FindByType<UnityEngine.EventSystems.EventSystem>(scene);
+                    var pauseCtrl = FindByType<LifeFromZero.City.Pause.PauseController>(scene);
+                    var pauseInt = FindByType<LifeFromZero.City.Pause.PauseIntegration>(scene);
+                    var pauseData = FindByType<LifeFromZero.City.Pause.PauseDataSource>(scene);
+                    var district = FindInterfaceBehaviour<LifeFromZero.City.Quarter.IQuarterPlanSource>(scene);
+                    Component districtLink = FindComponentByTypeName(scene, "District750Link");
+                    Component homeAnchor = FindComponentByTypeName(scene, "PlayerHomeAnchor");
+
+                    sb.AppendLine("- UiBootstrap: " + (uiBootstrap != null ? "есть" : "нет (нормально для вторичной сцены, если приходит через DontDestroyOnLoad из стартовой)"));
+                    sb.AppendLine("- EventSystem: " + (eventSystem != null ? DescribeEventSystem(eventSystem) : "нет"));
+                    sb.AppendLine("- PauseController / PauseIntegration: " +
+                                  (pauseCtrl != null ? "PauseController есть" : "нет") + " / " +
+                                  (pauseInt != null ? pauseInt.GetType().Name : "нет"));
+                    sb.AppendLine("- PauseDataSource: " + (pauseData != null ? pauseData.GetType().Name : "нет (покажет честное «Нет данных»)"));
+                    sb.AppendLine("- IQuarterPlanSource (район): " + (district != null ? district.GetType().Name : "нет"));
+                    sb.AppendLine("- Переходы сцен: District750Link=" + (districtLink != null ? "есть" : "нет") +
+                                  ", PlayerHomeAnchor=" + (homeAnchor != null ? "есть" : "нет"));
+                }
+                finally
+                {
+                    EditorSceneManager.CloseScene(scene, true);
+                }
+                sb.AppendLine();
+            }
+
+            return sb.ToString();
+        }
+
+        private static string DescribeEventSystem(UnityEngine.EventSystems.EventSystem es)
+        {
+            var modules = es.GetComponents<UnityEngine.EventSystems.BaseInputModule>();
+            if (modules == null || modules.Length == 0) return "ЕСТЬ, но БЕЗ InputModule (!)";
+            var names = new string[modules.Length];
+            for (int i = 0; i < modules.Length; i++)
+                names[i] = modules[i] != null ? modules[i].GetType().Name : "null";
+            return string.Join(", ", names);
+        }
+
+        private static Component FindComponentByTypeName(Scene scene, string typeName)
+        {
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                foreach (MonoBehaviour mb in root.GetComponentsInChildren<MonoBehaviour>(true))
+                {
+                    if (mb != null && mb.GetType().Name == typeName) return mb;
                 }
             }
             return null;

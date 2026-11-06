@@ -394,7 +394,7 @@ namespace LifeFromZero.UI.Core
         }
 
         /// <summary>Угол поворота в точке b: &gt;0 — направо, &lt;0 — налево, градусы.</summary>
-        internal static float TurnAngle(MapPoint a, MapPoint b, MapPoint c)
+        public static float TurnAngle(MapPoint a, MapPoint b, MapPoint c)
         {
             float inX = b.X - a.X, inZ = b.Z - a.Z;
             float outX = c.X - b.X, outZ = c.Z - b.Z;
@@ -598,7 +598,7 @@ namespace LifeFromZero.UI.Core
             return new NavigationCue(label, toManeuver, remaining, bearing);
         }
 
-        internal static string TurnLabel(float angleDegrees)
+        public static string TurnLabel(float angleDegrees)
         {
             float abs = Math.Abs(angleDegrees);
             if (abs < 22f) return "Прямо";
