@@ -35,11 +35,20 @@ namespace LifeFromZero.UI.Runtime
         public readonly List<string> Connected = new List<string>();
         public readonly List<string> Missing = new List<string>();
 
+        /// <summary>
+        /// Информационные строки: «так и должно быть» (например, в сцене квартиры
+        /// района нет). В отличие от <see cref="Missing"/>, это не дефект настройки
+        /// и не делает <see cref="IsComplete"/> ложным.
+        /// </summary>
+        public readonly List<string> Notes = new List<string>();
+
         public bool IsComplete => Missing.Count == 0;
 
         public void Ok(string what) => Connected.Add(what);
 
         public void Miss(string what) => Missing.Add(what);
+
+        public void Note(string what) => Notes.Add(what);
 
         public string Summary()
         {
@@ -50,6 +59,11 @@ namespace LifeFromZero.UI.Runtime
             {
                 text.Append("; НЕ подключено: ");
                 text.Append(string.Join(", ", Missing.ToArray()));
+            }
+            if (Notes.Count > 0)
+            {
+                text.Append("; норма: ");
+                text.Append(string.Join(", ", Notes.ToArray()));
             }
             return text.ToString();
         }
@@ -96,6 +110,18 @@ namespace LifeFromZero.UI.Runtime
         private bool _hadActiveRouteLastFrame;
         private LifeFromZero.City.Quarter.INotifyQuarterPlanSource _hookedPlanSource;
         private LifeFromZero.City.Pause.StandalonePauseIntegration _hookedStandalonePause;
+
+        /// <summary>Источник данных телефона, выбранный в <see cref="WirePhone"/> (один для данных и действий).</summary>
+        private IPhoneDataSource _phoneSource;
+
+        /// <summary>Установка уже выполнена (повторный вызов Install ничего не дублирует).</summary>
+        private bool _installed;
+
+        private float _nextDistrictRetry;
+        private int _districtRetryCount;
+
+        private const float DistrictRetryInterval = 1f;
+        private const int DistrictRetryLimit = 20;
 
         /// <summary>Активный экземпляр бутстрапа UI.</summary>
         public static UiBootstrap Instance { get; private set; }
@@ -158,11 +184,21 @@ namespace LifeFromZero.UI.Runtime
             _releaseModalGuardInLateUpdate = false;
             if (_modalGuard != null) _modalGuard.SetActive(false);
 
-            // ВАЖНО: НЕ обнуляем живые сериализованные/DontDestroyOnLoad-ссылки безусловно
-            // (SceneManager.sceneLoaded вызывается Unity в том числе сразу после Awake первой сцены!).
-            // Вместо этого очищаем только уничтоженные объекты старой сцены и обновляем мосты.
-            if (worldAdapter == null) worldAdapter = null;
-            if (snapshotSource == null) snapshotSource = null;
+            // ВАЖНО: ссылки на объекты уничтоженной сцены Unity уже считает «пустыми»
+            // (== null). Присваивание null убирает мёртвую ссылку из поля, после чего
+            // ResolveWorld/ResolveSnapshot ищут адаптеры в НОВОЙ сцене. Живые ссылки
+            // (DontDestroyOnLoad) не трогаем: sceneLoaded вызывается и сразу после
+            // Awake первой сцены.
+            worldAdapter = LiveReference(worldAdapter);
+            snapshotSource = LiveReference(snapshotSource);
+            deliverySystem = LiveReference(deliverySystem);
+            phoneSystem = LiveReference(phoneSystem);
+            _deliveryBridge = LiveReference(_deliveryBridge);
+
+            // Телефон: провайдер старой сцены мог быть уничтожен вместе с ней.
+            UnityEngine.Object phoneObject = _phoneSource as UnityEngine.Object;
+            if ((object)phoneObject != null && phoneObject == null) _phoneSource = null;
+
             if (districtSource == null)
             {
                 districtSource = null;
@@ -181,6 +217,11 @@ namespace LifeFromZero.UI.Runtime
             _plan = null;
             _mapGeometry = null;
             _router.Navigation.SetGraph(null);
+
+            // В новой сцене район может появиться позже генерации — счётчик попыток
+            // начинается заново (иначе в District750 после Apartment67 он уже исчерпан).
+            _districtRetryCount = 0;
+            _nextDistrictRetry = 0f;
 
             Report = new UiWiringReport();
             ResolveWorld();
@@ -215,8 +256,25 @@ namespace LifeFromZero.UI.Runtime
 
         // ------------------------------------------------------------------ установка
 
+        /// <summary>
+        /// Живая ссылка на объект Unity или null. Уничтоженный объект сравнивается
+        /// с null, но поле продолжает хранить мёртвую ссылку — её надо убрать,
+        /// иначе следующий <c>as IInterface</c> вернёт интерфейс к уничтоженному
+        /// объекту и обращение к нему даст MissingReferenceException.
+        /// </summary>
+        private static T LiveReference<T>(T target) where T : UnityEngine.Object
+        {
+            return target == null ? null : target;
+        }
+
         private void Install()
         {
+            // Повторный вызов (например, Ensure() сразу после AddComponent, когда
+            // Awake уже выполнил установку) не должен второй раз создавать экраны,
+            // перепривязывать мосты и затирать отчёт.
+            if (_installed) return;
+            _installed = true;
+
             Report = new UiWiringReport();
             EnsureModalGuard();
             _router = ResolveRouter();
@@ -404,8 +462,6 @@ namespace LifeFromZero.UI.Runtime
 
         private void ResolveDistrict()
         {
-            if (deliverySystem == null && phoneSystem == null) { /* необязательно */ }
-
             // План района берём там, где он уже сгенерирован: карта обязана рисовать
             // ТОТ ЖЕ город, что стоит в сцене, а не сгенерировать второй по сиду.
             //
@@ -448,13 +504,58 @@ namespace LifeFromZero.UI.Runtime
             if (source != null) plan = source.Plan;
             if (plan == null) plan = _externalPlan;
 
+            // Три состояния вместо одного «план не подключён» (ТЗ №045):
+            //   * в квартире №67 района нет вообще — это НОРМА, пишем Note, а не Miss;
+            //   * в District750 источник есть, но генерация ещё идёт — ждём PlanChanged
+            //     и пробуем повторно (генератор может строить район в своём Start,
+            //     а порядок выполнения у UiBootstrap = -100);
+            //   * план есть — подключаем.
+            DistrictPlanState state = DistrictPlanDiagnostics.Evaluate(source != null, plan != null);
+            string sourceName = source != null && districtSource != null ? districtSource.GetType().Name : null;
+
             if (plan == null)
             {
-                Report.Miss("плана района (QuarterPlan) — ожидание генерации или сцена без района");
+                if (DistrictPlanDiagnostics.IsProblem(state)) Report.Miss(DistrictPlanDiagnostics.Message(state, sourceName));
+                else Report.Note(DistrictPlanDiagnostics.Message(state, sourceName));
                 return;
             }
 
             ApplyDistrictPlan(plan, true);
+            Report.Ok(DistrictPlanDiagnostics.Message(state, sourceName));
+            _districtRetryCount = 0;
+        }
+
+        /// <summary>
+        /// Повторная попытка получить план района. Нужна, когда район строит другой
+        /// компонент в своём Start/Awake и он не реализует INotifyQuarterPlanSource
+        /// (или появляется в сцене позже бутстрапа). Ограничено, чтобы не работать вечно.
+        /// </summary>
+        private void RetryDistrictIfNeeded()
+        {
+            if (_plan != null) return;
+            if (_districtRetryCount >= DistrictRetryLimit) return;
+
+            float now = Time.unscaledTime;
+            if (now < _nextDistrictRetry) return;
+
+            _nextDistrictRetry = now + DistrictRetryInterval;
+            _districtRetryCount++;
+
+            ResolveDistrict();
+            if (_plan != null)
+            {
+                WireMap();
+                if (_map != null && _map.isActiveAndEnabled) _map.Refresh(true);
+                if (logReport)
+                    Debug.Log("[UiBootstrap] План района подключён повторной попыткой (" +
+                              _districtRetryCount + " из " + DistrictRetryLimit + ").");
+            }
+            else if (_districtRetryCount == DistrictRetryLimit && logReport)
+            {
+                Debug.LogWarning("[UiBootstrap] Район так и не появился за " + DistrictRetryLimit +
+                                 " попыток: карта покажет только сетку. Если это District750 — " +
+                                 "проверьте CityBootstrap/QuarterUnityAdapter и districtSource.");
+            }
         }
 
         private void HookPlanSource(LifeFromZero.City.Quarter.INotifyQuarterPlanSource notifySource)
@@ -596,23 +697,92 @@ namespace LifeFromZero.UI.Runtime
                     Report.Miss("части игры для команд доставки: " + _deliveryBridge.CommandBlockReason);
             }
 
-            // Телефон получает данные через делегаты. Конкретные источники подставляет
-            // интегратор проекта (см. UI/CODEX_EXECUTE.md): UI не знает про DeliveryService
-            // и PhoneFacade напрямую, чтобы не появилась вторая экономика.
-            IPhoneDataSource provider = snapshotSource as IPhoneDataSource;
-            if (provider == null) provider = _deliveryBridge;
+            // Телефон получает данные через делегаты. UI не знает про DeliveryService
+            // и PhoneFacade напрямую (иначе появилась бы вторая экономика), поэтому
+            // источник ищется по КОНТРАКТУ IPhoneDataSource. До ТЗ №045 здесь были
+            // только «UiSnapshotSource» и «DeliveryServiceBridge», из-за чего готовый
+            // PhoneFacadeUiBridge в сцене не находился, а поле phoneSystem не читалось
+            // вообще — телефон открывался с пустым рабочим столом.
+            IPhoneDataSource assigned = phoneSystem as IPhoneDataSource;
+            IPhoneDataSource sceneBridge = ResolveScenePhoneSource();
+            IPhoneDataSource snapshotBridge = snapshotSource as IPhoneDataSource;
+
+            PhoneSourceChoice choice = PhoneSourceResolver.Choose(
+                assigned != null,
+                _deliveryBridge != null,
+                sceneBridge != null,
+                snapshotBridge != null);
+
+            IPhoneDataSource provider = null;
+            switch (choice)
+            {
+                case PhoneSourceChoice.PhoneSystemField:
+                    provider = assigned;
+                    break;
+                case PhoneSourceChoice.DeliveryBridge:
+                    // Мост доставки умеет объединять заказы с внешним телефонным мостом
+                    // (сообщения, контакты, задачи). Передаём его, чтобы разделы телефона
+                    // не пропали только потому, что выбран мост доставки.
+                    if (PhoneSourceResolver.NeedsExternalBridge(choice) && sceneBridge != null)
+                        _deliveryBridge.UseExternalPhoneDataSource(sceneBridge);
+                    provider = _deliveryBridge;
+                    break;
+                case PhoneSourceChoice.ScenePhoneBridge:
+                    provider = sceneBridge;
+                    break;
+                case PhoneSourceChoice.SnapshotSource:
+                    provider = snapshotBridge;
+                    break;
+            }
+
+            _phoneSource = provider;
             if (provider != null)
             {
                 phone.DataProvider = provider.ReadPhone;
-                Report.Ok("данные телефона");
+                Report.Ok("данные телефона (" + PhoneSourceResolver.Describe(choice) + ")");
             }
             else
             {
-                Report.Miss("IPhoneDataSource — данные телефона (плитки, сообщения, заказы, банк)");
+                phone.DataProvider = null;
+                Report.Miss("IPhoneDataSource — данные телефона (плитки, сообщения, заказы, банк): " +
+                            "назначьте phoneSystem в UiBootstrap или добавьте PhoneFacadeUiBridge/DeliveryServiceBridge в сцену");
+                Debug.LogWarning("[UiBootstrap] Телефон не подключён к данным: рабочий стол покажет " +
+                                 "неактивные плитки. Нужен компонент с IPhoneDataSource " +
+                                 "(PhoneFacadeUiBridge из UnityIntegrationKit или DeliveryServiceBridge).");
             }
 
             phone.ActionHandler = OnPhoneAction;
             phone.RouteHandler = OnPhoneRoute;
+        }
+
+        /// <summary>
+        /// Компонент сцены, реализующий <see cref="IPhoneDataSource"/> и не являющийся
+        /// мостом доставки (его вызывает сам бутстрап отдельно). Так находится
+        /// PhoneFacadeUiBridge из UnityIntegrationKit: UI ссылается на интерфейс,
+        /// а не на сборку интеграции, поэтому цикла зависимостей нет.
+        /// </summary>
+        private IPhoneDataSource ResolveScenePhoneSource()
+        {
+            // Явно назначенное поле (PhoneSystemField) и UiSnapshotSource (SnapshotSource)
+            // проверяет сам PhoneSourceResolver — здесь ищем ТОЛЬКО «прочий» мост сцены,
+            // например PhoneFacadeUiBridge из UnityIntegrationKit.
+            if (phoneSystem is IPhoneDataSource) return null;
+
+            MonoBehaviour[] behaviours = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+            if (behaviours == null) return null;
+
+            for (int i = 0; i < behaviours.Length; i++)
+            {
+                MonoBehaviour candidate = behaviours[i];
+                if (candidate == null || ReferenceEquals(candidate, this)) continue;
+                if (ReferenceEquals(candidate, phoneSystem)) continue;
+                if (ReferenceEquals(candidate, snapshotSource)) continue;
+                if (_deliveryBridge != null && ReferenceEquals(candidate, _deliveryBridge)) continue;
+
+                var source = candidate as IPhoneDataSource;
+                if (source != null) return source;
+            }
+            return null;
         }
 
         private void WireMap()
@@ -639,6 +809,14 @@ namespace LifeFromZero.UI.Runtime
             if (action.StartsWith(PhoneActions.OpenApp, StringComparison.Ordinal))
             {
                 string appId = action.Substring(PhoneActions.OpenApp.Length);
+
+                // Сначала спрашиваем подключённый источник данных: PhoneFacade умеет
+                // отвечать на часть разделов. Раньше ответ «не подключено» выдавался
+                // ДО обращения к мосту, и раздел, который был готов, объявлялся чужим.
+                IPhoneDataSource data = CurrentPhoneSource();
+                string handled;
+                if (data != null && data.TryRun(action, out handled)) return handled;
+
                 return "Приложение «" + appId + "» не подключено к игре.";
             }
 
@@ -673,8 +851,7 @@ namespace LifeFromZero.UI.Runtime
                 return string.IsNullOrEmpty(outcome) ? "Действие с заказом не выполнено." : outcome;
             }
 
-            IPhoneDataSource phoneData = snapshotSource as IPhoneDataSource;
-            if (phoneData == null) phoneData = _deliveryBridge;
+            IPhoneDataSource phoneData = CurrentPhoneSource();
             if (phoneData != null)
             {
                 string outcome;
@@ -682,6 +859,27 @@ namespace LifeFromZero.UI.Runtime
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Источник данных телефона, выбранный в <see cref="WirePhone"/>. Один и тот же
+        /// для чтения снимка и для действий: раньше «Заказы» и «маршрут» искали мост
+        /// заново и теряли PhoneFacade-мост, объявляя телефон неподключённым.
+        /// </summary>
+        private IPhoneDataSource CurrentPhoneSource()
+        {
+            if (_phoneSource != null && IsAlive(_phoneSource)) return _phoneSource;
+
+            _phoneSource = phoneSystem as IPhoneDataSource ?? _deliveryBridge;
+            return _phoneSource;
+        }
+
+        private static bool IsAlive(IPhoneDataSource source)
+        {
+            if (source == null) return false;
+            UnityEngine.Object unityObject = source as UnityEngine.Object;
+            // Не Unity-объект — считаем живым; уничтоженный Unity-объект сравнивается с null.
+            return (object)unityObject == null || unityObject != null;
         }
 
         /// <summary>Мост к доставке: назначен в инспекторе → найден в сцене → нет.</summary>
@@ -701,8 +899,7 @@ namespace LifeFromZero.UI.Runtime
             if (_plan == null) return "Район не загружен — маршрут недоступен.";
             if (string.IsNullOrEmpty(orderId)) return "Заказ не выбран.";
 
-            IPhoneDataSource phoneData = snapshotSource as IPhoneDataSource;
-            if (phoneData == null) phoneData = _deliveryBridge;
+            IPhoneDataSource phoneData = CurrentPhoneSource();
             if (phoneData == null) return "Данные телефона не подключены.";
 
             PhoneSnapshot snapshot = phoneData.ReadPhone();
@@ -754,6 +951,10 @@ namespace LifeFromZero.UI.Runtime
         private void Update()
         {
             if (_router == null) return;
+
+            // Район мог появиться после Start (генерация в другой сцене/позже этого
+            // компонента). Дешёвая проверка не чаще раза в секунду и не вечно.
+            RetryDistrictIfNeeded();
 
             bool hasRoute = _router.Navigation.ActiveRoute != null;
             if (hasRoute)

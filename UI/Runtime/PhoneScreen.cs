@@ -76,6 +76,7 @@ namespace LifeFromZero.UI.Runtime
         private string _openContactId;
         private string _openOrderId;
         private readonly List<GameObject> _built = new List<GameObject>();
+        private bool _placeholderLogged;
 
         /// <summary>Поставщик данных телефона.</summary>
         public Func<PhoneSnapshot> DataProvider { get; set; }
@@ -291,13 +292,31 @@ namespace LifeFromZero.UI.Runtime
             SetTitle(string.IsNullOrEmpty(_data.LockDate) ? "Телефон" : _data.LockDate);
             RectTransform root = NewLayer("Home");
 
-            IReadOnlyList<PhoneAppTile> apps = _data.Apps ?? Array.Empty<PhoneAppTile>();
-            var ordered = OrderApps(apps);
+            // Что показать на рабочем столе — решает UI/Core (PhoneHomeState), а не экран:
+            // так правило проверяется тестами. Если данных нет, вместо пустого экрана
+            // показываются неактивные плитки + честное сообщение (ТЗ №045).
+            PhoneHomeContent home = PhoneHomeState.Resolve(_data.Apps, DataProvider != null);
+            IReadOnlyList<PhoneAppTile> ordered = home.Tiles;
 
-            if (ordered.Count == 0)
+            if (home.Placeholder && !_placeholderLogged)
             {
-                UiBuilder.Label("Empty", root,
-                    "Приложения не подключены.\nРегистрация: PhoneAppRegistry.CreateDefault().",
+                _placeholderLogged = true;
+                if (DataProvider == null)
+                {
+                    Debug.LogWarning("[PhoneScreen] Рабочий стол без данных: IPhoneDataSource не подключён. " +
+                                     "Плитки телефона приходят из PhoneSnapshot.Apps (PhoneFacadeUiBridge / " +
+                                     "DeliveryServiceBridge), а не из PhoneAppRegistry.CreateDefault().");
+                }
+                else
+                {
+                    Debug.LogWarning("[PhoneScreen] Источник данных телефона вернул пустой список приложений " +
+                                     "(PhoneSnapshot.Apps): рабочий стол показывает заглушки.");
+                }
+            }
+
+            if (home.IsEmpty)
+            {
+                UiBuilder.Label("Empty", root, home.Notice ?? PhoneHomeState.NoDataSourceNotice,
                     0.04f, 0.40f, 0.96f, 0.64f, UiTheme.Px(16f), UiTheme.PhoneTextMuted,
                     TextAnchor.MiddleCenter);
                 return;
@@ -347,6 +366,12 @@ namespace LifeFromZero.UI.Runtime
                 }
             }
 
+            if (!string.IsNullOrEmpty(home.Notice))
+            {
+                UiBuilder.Label("Notice", root, home.Notice, 0.04f, 0.128f, 0.96f, 0.200f,
+                    UiTheme.Px(12f), UiTheme.PhoneTextMuted, TextAnchor.MiddleCenter);
+            }
+
             // Нижняя панель с быстрыми приложениями (как в референсе).
             Image dock = UiBuilder.Image("Dock", root, 0.05f, 0.005f, 0.95f, 0.115f,
                 new Color(0.14f, 0.14f, 0.15f, 0.90f), _sprites.Rounded(18));
@@ -365,22 +390,6 @@ namespace LifeFromZero.UI.Runtime
                     AppIcon(dockIds[i], app != null ? app.IconKind : null),
                     0.25f, 0.25f, 0.75f, 0.75f, new Color(1f, 1f, 1f, 0.95f));
             }
-        }
-
-        private List<PhoneAppTile> OrderApps(IReadOnlyList<PhoneAppTile> apps)
-        {
-            var result = new List<PhoneAppTile>(apps.Count);
-            IReadOnlyList<string> order = PhoneAppIds.HomeOrder;
-            for (int i = 0; i < order.Count; i++)
-            {
-                PhoneAppTile app = FindApp(order[i]);
-                if (app != null) result.Add(app);
-            }
-            for (int i = 0; i < apps.Count; i++)
-            {
-                if (!result.Contains(apps[i])) result.Add(apps[i]);
-            }
-            return result;
         }
 
         private PhoneAppTile FindApp(string id)

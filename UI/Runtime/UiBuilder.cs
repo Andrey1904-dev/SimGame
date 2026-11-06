@@ -86,6 +86,63 @@ namespace LifeFromZero.UI.Runtime
             return rect;
         }
 
+        /// <summary>
+        /// Слой собственной uGUI-графики (сетка карты, маршрут): RectTransform +
+        /// ГАРАНТИРОВАННЫЙ CanvasRenderer + компонент <typeparamref name="T"/>.
+        /// </summary>
+        /// <remarks>
+        /// ТЗ №045. В Play Mode Unity выдавал
+        /// «MissingComponentException: There is no 'CanvasRenderer' attached to the
+        /// "Grid"/"Route" game object» сотни раз. Причина — Graphic без CanvasRenderer:
+        /// uGUI перестраивает такой слой на каждом обновлении канваса и падает каждый раз.
+        /// Поэтому здесь рендерер проверяется ЯВНО до добавления графики, а не
+        /// полагаемся только на [RequireComponent] базового класса: если Unity по какой-то
+        /// причине его не добавил, слой отключается с ОДНИМ понятным сообщением, а не
+        /// заливает консоль исключениями.
+        /// </remarks>
+        public static T GraphicLayer<T>(string name, Transform parent,
+            float x0, float y0, float x1, float y1, out bool canvasRendererAdded) where T : Graphic
+        {
+            RectTransform rect = Rect(name, parent, x0, y0, x1, y1);
+            return AttachGraphic<T>(rect, out canvasRendererAdded);
+        }
+
+        /// <summary>Добавить uGUI-графику на готовый RectTransform с проверкой CanvasRenderer.</summary>
+        public static T AttachGraphic<T>(RectTransform rect, out bool canvasRendererAdded) where T : Graphic
+        {
+            canvasRendererAdded = false;
+            if (rect == null) return null;
+
+            GameObject go = rect.gameObject;
+            if (go.GetComponent<CanvasRenderer>() == null)
+            {
+                try
+                {
+                    go.AddComponent<CanvasRenderer>();
+                    canvasRendererAdded = go.GetComponent<CanvasRenderer>() != null;
+                }
+                catch (System.Exception exception)
+                {
+                    Debug.LogError("[UI] Не удалось добавить CanvasRenderer объекту «" + rect.name +
+                                   "»: " + exception.Message);
+                }
+            }
+
+            T graphic = go.AddComponent<T>();
+
+            if (go.GetComponent<CanvasRenderer>() == null)
+            {
+                Debug.LogError("[UI] Объект «" + rect.name + "» получил " + typeof(T).Name +
+                               " без CanvasRenderer — uGUI не сможет его нарисовать, слой ОТКЛЮЧЁН. " +
+                               "Проверьте объект в сцене (Tools → Life From Zero → UI → " +
+                               "Verify Scenes & Adapters) и пересоздайте компонент.");
+                graphic.enabled = false;
+            }
+
+            graphic.raycastTarget = false;
+            return graphic;
+        }
+
         /// <summary>Подложка-изображение (по умолчанию без рейкаста).</summary>
         public static Image Image(string name, Transform parent, float x0, float y0, float x1, float y1,
             Color color, Sprite sprite = null, bool raycast = false)

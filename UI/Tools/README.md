@@ -6,7 +6,8 @@
 |---|---|
 | `python3 UI/Tools/checkui.py` | компиляция `UI/Core` + `UI/Runtime` + `City/Quarter` против стабов Unity |
 | `python3 UI/Tools/checkeditor.py` | то же + `UI/Editor` против стабов UnityEditor |
-| `python3 UI/Tools/runtests.py` | 92 теста UI (логика, раскладка, район, привязка) |
+| `python3 UI/Tools/runtests.py` | 122 теста UI (логика, раскладка, район, привязка, телефон, регрессии ТЗ №045) |
+| `python3 UI/Tools/check_graphic_layers.py` | статический контракт ТЗ №045: `CanvasRenderer` у слоёв карты, гейт перерисовки, источник данных телефона |
 | `python3 UI/Tools/runtc.py mydiag.cs` | разовый диагностический `Diag.Main()` против ядра |
 | `UI/Tools/check.sh "a.cs,b.cs"` | компиляция произвольного набора файлов |
 

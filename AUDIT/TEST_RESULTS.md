@@ -41,9 +41,11 @@
 
 > Изменения после сквозной интеграции PR #14 + PR #15 (2026-11-06):
 > City 100/0 (+2 теста `INotifyQuarterPlanSource.PlanChanged` в `QuarterPlanSourceTests`),
-> UI 103/103 (+4 теста интеграции доставки/телефона/навигации в `UiCoreTests`),
+> UI 122/122 (+4 теста интеграции доставки/телефона/навигации в `UiCoreTests`,
+> +19 регрессий ТЗ №045 в `UI/Tests/UiRegression045Tests.cs`),
 > добавлена по-сборочная Roslyn-проверка 17 `.asmdef` + `Assembly-CSharp` + `Assembly-CSharp-Editor` (`AUDIT/tools/check_unity6_compile.py`).
-> **Итого по репозиторию: 405 модульных проверок + 103 UI = 508, провалов 0.**
+> **Итого по репозиторию: 405 модульных проверок + 122 UI = 527, провалов 0
+> (в песочнице без ICU один UI-тест про кириллицу падает — см. примечание в `UI/REPORT_045_UI_FIXES.md`).**
 
 ## 2. Проваленные тесты Phone: причины и исправление
 
@@ -234,7 +236,7 @@ python3 City/Tools/district_layout_check.py
 ## 7. Итог по проверкам
 
 * **Реально исполнено (после исправлений и интеграции UI+City):** 405 проверок в 5 модулях (Economy 60,
-  Jobs 55, Phone 93, Debts 97, City 100) + 103 UI = **508 C#-тестов**, плюс по-сборочная Roslyn-компиляция всех 17 `.asmdef` + `Assembly-CSharp` + `Assembly-CSharp-Editor` в 3 профилях ввода Unity 6000.3.27f1.
+  Jobs 55, Phone 93, Debts 97, City 100) + 122 UI = **527 C#-тестов**, плюс по-сборочная Roslyn-компиляция всех 17 `.asmdef` + `Assembly-CSharp` + `Assembly-CSharp-Editor` в 3 профилях ввода Unity 6000.3.27f1.
 * **Провалено:** **0**.
 * **Исправлено блокирующих дефектов компиляции Unity 6000.3.27f1 в `main`:** `LifeFromZero.UI.Tests` (`internal` `TurnAngle`/`TurnLabel` между `.asmdef`) и `City/UnityIntegration/Editor/LifeFromZeroGameIntegration.cs` (отсутствовал `using LifeFromZero.City.Quarter;`).
 * **Не исполнено:** 8 `PauseTests` (нужен Unity Test Runner), Play Mode в реальном редакторе Unity 6000.3.27f1, визуальные проверки uGUI/рендера, запуск локального проекта `/Users/homepc/Projects/LifeFromZero` (недоступен в среде песочницы).

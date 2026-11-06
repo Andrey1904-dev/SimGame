@@ -52,6 +52,47 @@ namespace LifeFromZero.UI.Core
             return id == "map" || id == "maps" || id == "карта";
         }
 
+        /// <summary>
+        /// Раскладывает плитки в порядке рабочего стола (<see cref="HomeOrder"/>),
+        /// отбрасывая недопустимые приложения и дубликаты по нормализованному id.
+        /// Лишние плитки (которых нет в референсе) идут в конце, а не теряются.
+        /// </summary>
+        public static List<PhoneAppTile> Sort(IReadOnlyList<PhoneAppTile> apps)
+        {
+            var result = new List<PhoneAppTile>();
+            if (apps == null || apps.Count == 0) return result;
+
+            var used = new bool[apps.Count];
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+
+            IReadOnlyList<string> order = HomeOrder;
+            for (int i = 0; i < order.Count; i++)
+            {
+                for (int j = 0; j < apps.Count; j++)
+                {
+                    if (used[j]) continue;
+                    PhoneAppTile app = apps[j];
+                    if (app == null) { used[j] = true; continue; }
+                    if (IsForbiddenInPhone(app.Id)) { used[j] = true; continue; }
+                    if (Normalize(app.Id) != order[i]) continue;
+
+                    used[j] = true;
+                    if (seen.Add(Normalize(app.Id))) result.Add(app);
+                    break;
+                }
+            }
+
+            for (int j = 0; j < apps.Count; j++)
+            {
+                if (used[j] || apps[j] == null) continue;
+                if (IsForbiddenInPhone(apps[j].Id)) continue;
+                if (!seen.Add(Normalize(apps[j].Id))) continue;
+                result.Add(apps[j]);
+            }
+
+            return result;
+        }
+
         /// <summary>Нормализует идентификатор приложения между модулем Phone (<c>jobs</c>) и UI (<c>orders</c>).</summary>
         public static string Normalize(string appId)
         {
